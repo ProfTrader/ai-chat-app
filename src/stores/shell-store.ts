@@ -2,9 +2,12 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ViewType } from "@/types";
 
+export type SidebarMode = "inbox" | "projects";
+
 interface ShellState {
   navCollapsed: boolean;
   inspectorCollapsed: boolean;
+  sidebarMode: SidebarMode;
   activeView: ViewType;
   commandOpen: boolean;
   shortcutsOpen: boolean;
@@ -12,6 +15,7 @@ interface ShellState {
   setInspectorCollapsed: (collapsed: boolean) => void;
   toggleNav: () => void;
   toggleInspector: () => void;
+  setSidebarMode: (mode: SidebarMode) => void;
   setActiveView: (view: ViewType) => void;
   setCommandOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
@@ -22,6 +26,7 @@ export const useShellStore = create<ShellState>()(
     (set) => ({
       navCollapsed: false,
       inspectorCollapsed: false,
+      sidebarMode: "projects",
       activeView: "chat",
       commandOpen: false,
       shortcutsOpen: false,
@@ -29,6 +34,7 @@ export const useShellStore = create<ShellState>()(
       setInspectorCollapsed: (inspectorCollapsed) => set({ inspectorCollapsed }),
       toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
       toggleInspector: () => set((s) => ({ inspectorCollapsed: !s.inspectorCollapsed })),
+      setSidebarMode: (sidebarMode) => set({ sidebarMode }),
       setActiveView: (activeView) => set({ activeView }),
       setCommandOpen: (commandOpen) => set({ commandOpen }),
       setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
@@ -38,6 +44,7 @@ export const useShellStore = create<ShellState>()(
       partialize: (state) => ({
         navCollapsed: state.navCollapsed,
         inspectorCollapsed: state.inspectorCollapsed,
+        sidebarMode: state.sidebarMode,
         activeView: state.activeView,
       }),
     },

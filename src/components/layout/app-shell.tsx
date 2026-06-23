@@ -1,4 +1,4 @@
-import { IconRail, TitleBar } from "@/components/layout/icon-rail";
+import { TitleBar } from "@/components/layout/icon-rail";
 import { StatusBar } from "@/components/layout/status-bar";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
 import { MainWorkspace } from "@/components/workspace/main-workspace";
@@ -22,12 +22,10 @@ export function AppShell() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <TitleBar />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <IconRail />
-        <div
-          className="grid h-full min-h-0 min-w-0 flex-1 overflow-hidden"
-          style={{ gridTemplateColumns }}
-        >
+      <div
+        className="grid h-full min-h-0 min-w-0 flex-1 overflow-hidden"
+        style={{ gridTemplateColumns }}
+      >
           {!navCollapsed && (
             <section
               aria-label="Navigation"
@@ -52,7 +50,6 @@ export function AppShell() {
               <InspectorPanel />
             </section>
           )}
-        </div>
       </div>
       <StatusBar />
       <CommandPalette />
