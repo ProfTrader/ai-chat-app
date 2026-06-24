@@ -1,6 +1,14 @@
 import { useMemo } from "react";
-import { Circle, CircleCheck, CircleDashed } from "lucide-react";
+import { Circle, CircleCheck, CircleDashed, ListTodo } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -40,6 +48,9 @@ function TaskRow({ task, isSelected }: { task: Task; isSelected: boolean }) {
         {task.identifier}
       </span>
       <span className="min-w-0 flex-1 truncate text-base">{task.title}</span>
+      <Badge variant="outline" className="font-normal capitalize">
+        {task.status.replace("_", " ")}
+      </Badge>
       {task.dueDate && (
         <span className="shrink-0 text-sm text-muted-foreground">{task.dueDate}</span>
       )}
@@ -66,8 +77,18 @@ export function TaskList() {
 
   if (tasks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-base text-muted-foreground">
-        No tasks in this project yet.
+      <div className="flex h-full items-center justify-center px-6 pb-32">
+        <Empty className="max-w-md border border-dashed border-border bg-card/40">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ListTodo />
+            </EmptyMedia>
+            <EmptyTitle>No tasks yet</EmptyTitle>
+            <EmptyDescription>
+              Tasks for this project will show up here with status badges and due dates.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
   }

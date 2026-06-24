@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronRight,
   FolderKanban,
@@ -10,17 +10,20 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
 import type { Project, Session } from "@/types";
-
-function formatRelativeTime(value: string) {
-  return value;
-}
 
 function SidebarNavItem({
   icon: Icon,
@@ -34,19 +37,19 @@ function SidebarNavItem({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <Button
+      variant="ghost"
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+        "h-auto w-full justify-start px-2.5 py-2 font-normal",
         isActive
           ? "bg-muted text-foreground"
           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
       )}
+      onClick={onClick}
     >
-      <Icon className="size-4 shrink-0 opacity-80" />
+      <Icon data-icon="inline-start" />
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -54,19 +57,19 @@ function ProjectItem({ project, isActive }: { project: Project; isActive: boolea
   const setProjectId = useSelectionStore((s) => s.setProjectId);
 
   return (
-    <button
-      type="button"
-      onClick={() => setProjectId(project.id)}
+    <Button
+      variant="ghost"
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+        "h-auto w-full justify-start px-2.5 py-2 font-normal",
         isActive
           ? "bg-muted text-foreground"
           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
       )}
+      onClick={() => setProjectId(project.id)}
     >
-      <ChevronRight className="size-4 shrink-0 opacity-50" />
+      <ChevronRight data-icon="inline-start" />
       <span className="truncate">{project.name}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -84,25 +87,25 @@ function SessionItem({
   const { setProjectId, setSessionId } = useSelectionStore();
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        setProjectId(session.projectId);
-        setSessionId(session.id);
-      }}
+    <Button
+      variant="ghost"
       className={cn(
-        "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+        "h-auto w-full justify-start px-2.5 py-2 font-normal",
         isActive
           ? "bg-muted text-foreground"
           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
       )}
+      onClick={() => {
+        setProjectId(session.projectId);
+        setSessionId(session.id);
+      }}
     >
       {session.pinned ? (
-        <Pin className="size-4 shrink-0 text-destructive" />
+        <Pin data-icon="inline-start" className="text-destructive" />
       ) : (
-        <span className="size-4 shrink-0" />
+        <span className="size-4 shrink-0" data-icon="inline-start" />
       )}
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 flex-1 text-left">
         <span className="block truncate">{session.title}</span>
         {showProject && projectName && (
           <span className="block truncate text-xs text-muted-foreground/70">
@@ -113,22 +116,28 @@ function SessionItem({
       <span className="shrink-0 text-xs text-muted-foreground/70">
         {formatRelativeTime(session.updatedAt)}
       </span>
-    </button>
+    </Button>
   );
 }
 
-function ProjectsPanel() {
+function ProjectsPanel({ query }: { query: string }) {
   const { projects, sessions } = useDataStore();
   const { workspaceId, projectId, sessionId } = useSelectionStore();
 
   const workspaceProjects = useMemo(
-    () => projects.filter((p) => p.workspaceId === workspaceId),
-    [projects, workspaceId],
+    () =>
+      projects
+        .filter((p) => p.workspaceId === workspaceId)
+        .filter((p) => p.name.toLowerCase().includes(query.toLowerCase())),
+    [projects, workspaceId, query],
   );
 
   const projectSessions = useMemo(
-    () => sessions.filter((s) => s.projectId === projectId),
-    [sessions, projectId],
+    () =>
+      sessions
+        .filter((s) => s.projectId === projectId)
+        .filter((s) => s.title.toLowerCase().includes(query.toLowerCase())),
+    [sessions, projectId, query],
   );
 
   const pinnedSessions = projectSessions.filter((s) => s.pinned);
@@ -186,7 +195,7 @@ function ProjectsPanel() {
   );
 }
 
-function InboxPanel() {
+function InboxPanel({ query }: { query: string }) {
   const { projects, sessions } = useDataStore();
   const { workspaceId, sessionId } = useSelectionStore();
 
@@ -201,8 +210,11 @@ function InboxPanel() {
   );
 
   const inboxSessions = useMemo(
-    () => sessions.filter((session) => workspaceProjectIds.has(session.projectId)),
-    [sessions, workspaceProjectIds],
+    () =>
+      sessions
+        .filter((session) => workspaceProjectIds.has(session.projectId))
+        .filter((session) => session.title.toLowerCase().includes(query.toLowerCase())),
+    [sessions, workspaceProjectIds, query],
   );
 
   const pinnedSessions = inboxSessions.filter((session) => session.pinned);
@@ -250,7 +262,19 @@ function InboxPanel() {
 }
 
 export function NavSidebar() {
-  const { sidebarMode, setSidebarMode, setCommandOpen } = useShellStore();
+  const { sidebarMode, setSidebarMode, setCommandOpen, setSettingsOpen, setActiveView } =
+    useShellStore();
+  const { projectId, setSessionId } = useSelectionStore();
+  const addSession = useDataStore((s) => s.addSession);
+  const [query, setQuery] = useState("");
+
+  const handleNewSession = async () => {
+    if (!projectId) return;
+    const session = await addSession(projectId);
+    setSessionId(session.id);
+    setActiveView("chat");
+    setSidebarMode("projects");
+  };
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-sidebar">
@@ -263,25 +287,47 @@ export function NavSidebar() {
             <p className="mt-1 truncate text-base font-medium">Acme Corp</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-              title="New session"
-            >
-              <SquarePen />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-              onClick={() => setCommandOpen(true)}
-              title="Search (Ctrl+K)"
-            >
-              <Search />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => void handleNewSession()}
+                  />
+                }
+              >
+                <SquarePen />
+              </TooltipTrigger>
+              <TooltipContent>New session</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => setCommandOpen(true)}
+                  />
+                }
+              >
+                <Search />
+              </TooltipTrigger>
+              <TooltipContent>Search (Ctrl+K)</TooltipContent>
+            </Tooltip>
           </div>
         </div>
+      </div>
+
+      <div className="border-b border-border px-3 py-2">
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filter sessions and projects"
+          className="h-8 bg-background/40"
+        />
       </div>
 
       <div className="border-b border-border px-2 py-2">
@@ -302,19 +348,30 @@ export function NavSidebar() {
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        {sidebarMode === "inbox" ? <InboxPanel /> : <ProjectsPanel />}
+        {sidebarMode === "inbox" ? (
+          <InboxPanel query={query} />
+        ) : (
+          <ProjectsPanel query={query} />
+        )}
       </ScrollArea>
 
       <div className="flex items-center justify-between border-t border-border px-2 py-2">
         <ThemeToggle />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground"
-          title="Settings"
-        >
-          <Settings />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                onClick={() => setSettingsOpen(true)}
+              />
+            }
+          >
+            <Settings />
+          </TooltipTrigger>
+          <TooltipContent>Settings</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

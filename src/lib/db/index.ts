@@ -175,7 +175,23 @@ export async function insertMessage(message: Message) {
   );
   await database.execute(
     "UPDATE sessions SET updated_at = $1 WHERE id = $2",
-    ["now", message.sessionId],
+    [new Date().toISOString(), message.sessionId],
+  );
+}
+
+export async function insertSession(session: Session) {
+  const database = await getDb();
+  await database.execute(
+    "INSERT INTO sessions (id, project_id, title, pinned, updated_at) VALUES ($1, $2, $3, $4, $5)",
+    [session.id, session.projectId, session.title, session.pinned ? 1 : 0, session.updatedAt],
+  );
+}
+
+export async function updateSessionTitleDb(sessionId: string, title: string) {
+  const database = await getDb();
+  await database.execute(
+    "UPDATE sessions SET title = $1, updated_at = $2 WHERE id = $3",
+    [title, new Date().toISOString(), sessionId],
   );
 }
 

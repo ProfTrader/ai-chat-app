@@ -32,6 +32,14 @@ interface DataState {
   addTask: (task: Omit<Task, "id" | "createdAt" | "updatedAt" | "identifier">) => Promise<Task>;
   updateTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
   addMessage: (sessionId: string, content: string, role?: Message["role"]) => Promise<Message>;
+  persistChatMessage: (
+    sessionId: string,
+    content: string,
+    role?: Message["role"],
+    id?: string,
+  ) => Promise<Message>;
+  addSession: (projectId: string, title?: string) => Promise<Session>;
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   addProject: (name: string, workspaceId: string) => Promise<Project>;
   getTasksByProject: (projectId: string) => Task[];
   getContactsByProject: (projectId: string) => Contact[];
@@ -144,9 +152,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
   },
 
-  addMessage: async (sessionId, content, role = "user") => {
+  addMessage: async (sessionId, content, role = "user") =>
+    get().persistChatMessage(sessionId, content, role),
+
+  persistChatMessage: async (sessionId, content, role = "user", id) => {
     const message: Message = {
-      id: generateId("msg"),
+      id: id ?? generateId("msg"),
       sessionId,
       role,
       content,
@@ -155,7 +166,7 @@ export const useDataStore = create<DataState>((set, get) => ({
 
     const messages = [...get().messages, message];
     const sessions = get().sessions.map((s) =>
-      s.id === sessionId ? { ...s, updatedAt: "now" } : s,
+      s.id === sessionId ? { ...s, updatedAt: new Date().toISOString() } : s,
     );
 
     set({ messages, sessions });
@@ -171,29 +182,54 @@ export const useDataStore = create<DataState>((set, get) => ({
       persistLocal(get());
     }
 
-    setTimeout(async () => {
-      const reply: Message = {
-        id: generateId("msg"),
-        sessionId,
-        role: "assistant",
-        content:
-          "Got it. I've noted that in the session. (AI integration is a stub for now.)",
-        createdAt: new Date().toISOString(),
-      };
-      set({ messages: [...get().messages, reply] });
-      if (await isTauriRuntime()) {
-        try {
-          const { insertMessage } = await import("@/lib/db");
-          await insertMessage(reply);
-        } catch {
-          // ignore
-        }
-      } else {
-        persistLocal(get());
-      }
-    }, 600);
-
     return message;
+  },
+
+  addSession: async (projectId, title = "New session") => {
+    const session: Session = {
+      id: generateId("session"),
+      projectId,
+      title: title.length > 48 ? `${title.slice(0, 45)}…` : title,
+      pinned: false,
+      updatedAt: new Date().toISOString(),
+    };
+
+    set({ sessions: [session, ...get().sessions] });
+
+    if (await isTauriRuntime()) {
+      try {
+        const { insertSession } = await import("@/lib/db");
+        await insertSession(session);
+      } catch (err) {
+        console.warn("Failed to persist session:", err);
+      }
+    } else {
+      persistLocal(get());
+    }
+
+    return session;
+  },
+
+  updateSessionTitle: async (sessionId, title) => {
+    const nextTitle = title.length > 48 ? `${title.slice(0, 45)}…` : title;
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, title: nextTitle, updatedAt: new Date().toISOString() }
+          : session,
+      ),
+    });
+
+    if (await isTauriRuntime()) {
+      try {
+        const { updateSessionTitleDb } = await import("@/lib/db");
+        await updateSessionTitleDb(sessionId, nextTitle);
+      } catch (err) {
+        console.warn("Failed to update session title:", err);
+      }
+    } else {
+      persistLocal(get());
+    }
   },
 
   addProject: async (name, workspaceId) => {

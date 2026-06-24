@@ -1,4 +1,13 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -22,13 +31,15 @@ function ContactRow({
         isSelected ? "bg-muted/60" : "hover:bg-muted/40",
       )}
     >
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium">
-        {contact.name
-          .split(" ")
-          .map((n) => n[0])
-          .join("")
-          .slice(0, 2)}
-      </div>
+      <Avatar className="size-10 shrink-0">
+        <AvatarFallback>
+          {contact.name
+            .split(" ")
+            .map((n) => n[0])
+            .join("")
+            .slice(0, 2)}
+        </AvatarFallback>
+      </Avatar>
       <div className="min-w-0 flex-1">
         <p className="truncate text-base font-medium">{contact.name}</p>
         <p className="truncate text-sm text-muted-foreground">{contact.company}</p>
@@ -47,8 +58,18 @@ export function ContactList() {
 
   if (contacts.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-base text-muted-foreground">
-        No contacts in this project yet.
+      <div className="flex h-full items-center justify-center px-6 pb-32">
+        <Empty className="max-w-md border border-dashed border-border bg-card/40">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Users />
+            </EmptyMedia>
+            <EmptyTitle>No contacts yet</EmptyTitle>
+            <EmptyDescription>
+              Contacts for this project will appear here once you add them.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
   }
