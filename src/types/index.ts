@@ -26,6 +26,8 @@ export interface Task {
   updatedAt: string;
 }
 
+export type PresenceStatus = "online" | "away" | "busy" | "offline";
+
 export interface Contact {
   id: string;
   projectId: string;
@@ -35,6 +37,8 @@ export interface Contact {
   phone?: string;
   lastActivity: string;
   notes?: string;
+  avatarUrl?: string;
+  status?: PresenceStatus;
 }
 
 export interface Session {
@@ -59,6 +63,19 @@ export interface TeamMember {
   name: string;
   role: string;
   email: string;
+  avatarUrl?: string;
+  status?: PresenceStatus;
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  workspace: string;
+  bio?: string;
+  avatarUrl: string;
+  status: PresenceStatus;
 }
 
 export type ViewType = "chat" | "tasks" | "contacts" | "board";

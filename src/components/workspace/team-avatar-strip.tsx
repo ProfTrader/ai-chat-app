@@ -1,4 +1,5 @@
-import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
+import { AvatarGroup } from "@/components/ui/avatar";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -6,7 +7,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { getInitials } from "@/lib/team-utils";
 import { cn } from "@/lib/utils";
 import { useSelectionStore } from "@/stores/selection-store";
 import type { TeamMember } from "@/types";
@@ -62,9 +62,12 @@ export function TeamAvatarStrip({ members }: TeamAvatarStripProps) {
                   )}
                   onClick={() => handleMemberClick(member)}
                 >
-                  <Avatar size="default">
-                    <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-                  </Avatar>
+                  <PersonAvatar
+                    name={member.name}
+                    avatarUrl={member.avatarUrl}
+                    status={member.status}
+                    shape="square"
+                  />
                 </TooltipTrigger>
                 <TooltipContent>
                   {member.name} · {member.role}

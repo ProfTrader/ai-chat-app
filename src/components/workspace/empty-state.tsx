@@ -27,7 +27,7 @@ export function EmptyState() {
 
   return (
     <div className="flex h-full items-center justify-center px-8 pb-32">
-      <Empty className="max-w-lg border border-dashed border-border bg-card/40">
+      <Empty className="max-w-lg border border-border bg-pane">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <MessageSquare />

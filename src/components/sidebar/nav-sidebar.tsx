@@ -18,12 +18,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { ProfileSection } from "@/components/profile/profile-section";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
 import type { Project, Session } from "@/types";
+
+const listItemClass = (isActive: boolean) =>
+  cn(
+    "h-auto w-full justify-start rounded-md px-2.5 py-2 font-normal",
+    isActive
+      ? "bg-active-soft text-foreground"
+      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+  );
 
 function SidebarNavItem({
   icon: Icon,
@@ -39,12 +48,7 @@ function SidebarNavItem({
   return (
     <Button
       variant="ghost"
-      className={cn(
-        "h-auto w-full justify-start px-2.5 py-2 font-normal",
-        isActive
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-      )}
+      className={listItemClass(isActive)}
       onClick={onClick}
     >
       <Icon data-icon="inline-start" />
@@ -59,12 +63,7 @@ function ProjectItem({ project, isActive }: { project: Project; isActive: boolea
   return (
     <Button
       variant="ghost"
-      className={cn(
-        "h-auto w-full justify-start px-2.5 py-2 font-normal",
-        isActive
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-      )}
+      className={listItemClass(isActive)}
       onClick={() => setProjectId(project.id)}
     >
       <ChevronRight data-icon="inline-start" />
@@ -89,19 +88,14 @@ function SessionItem({
   return (
     <Button
       variant="ghost"
-      className={cn(
-        "h-auto w-full justify-start px-2.5 py-2 font-normal",
-        isActive
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-      )}
+      className={listItemClass(isActive)}
       onClick={() => {
         setProjectId(session.projectId);
         setSessionId(session.id);
       }}
     >
       {session.pinned ? (
-        <Pin data-icon="inline-start" className="text-destructive" />
+        <Pin data-icon="inline-start" className="text-fin" />
       ) : (
         <span className="size-4 shrink-0" data-icon="inline-start" />
       )}
@@ -162,7 +156,7 @@ function ProjectsPanel({ query }: { query: string }) {
 
       {pinnedSessions.length > 0 && (
         <section>
-          <p className="mb-1.5 px-2.5 text-xs font-medium tracking-wider text-destructive uppercase">
+          <p className="mb-1.5 px-2.5 text-xs font-medium tracking-wider text-muted-foreground uppercase">
             Pinned
           </p>
           <div className="flex flex-col gap-0.5">
@@ -224,7 +218,7 @@ function InboxPanel({ query }: { query: string }) {
     <div className="flex flex-col gap-5 p-3">
       {pinnedSessions.length > 0 && (
         <section>
-          <p className="mb-1.5 px-2.5 text-xs font-medium tracking-wider text-destructive uppercase">
+          <p className="mb-1.5 px-2.5 text-xs font-medium tracking-wider text-muted-foreground uppercase">
             Pinned
           </p>
           <div className="flex flex-col gap-0.5">
@@ -277,7 +271,7 @@ export function NavSidebar() {
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-sidebar">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-pane">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -326,7 +320,7 @@ export function NavSidebar() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter sessions and projects"
-          className="h-8 bg-background/40"
+          className="h-8 border-border bg-pane"
         />
       </div>
 
@@ -355,23 +349,26 @@ export function NavSidebar() {
         )}
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-border px-2 py-2">
-        <ThemeToggle />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                onClick={() => setSettingsOpen(true)}
-              />
-            }
-          >
-            <Settings />
-          </TooltipTrigger>
-          <TooltipContent>Settings</TooltipContent>
-        </Tooltip>
+      <div className="flex flex-col gap-2 border-t border-border px-2 py-2">
+        <ProfileSection />
+        <div className="flex items-center justify-between px-1">
+          <ThemeToggle />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  onClick={() => setSettingsOpen(true)}
+                />
+              }
+            >
+              <Settings />
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </div>
   );

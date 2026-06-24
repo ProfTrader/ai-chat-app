@@ -2,7 +2,7 @@ import { Activity, Bot, Clock } from "lucide-react";
 
 export function StatusBar() {
   return (
-    <footer className="flex h-8 shrink-0 items-center justify-between border-t border-border bg-sidebar px-4 text-xs text-muted-foreground">
+    <footer className="flex h-8 shrink-0 items-center justify-between border-t border-border bg-pane px-4 text-xs text-muted-foreground">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
           <Activity className="size-4 text-success" />

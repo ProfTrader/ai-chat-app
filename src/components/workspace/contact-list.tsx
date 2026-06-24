@@ -1,5 +1,5 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import {
   Empty,
   EmptyDescription,
@@ -28,18 +28,17 @@ function ContactRow({
       onClick={() => selectContact(contact)}
       className={cn(
         "flex w-full items-center gap-3 border-b border-border/50 px-5 py-3.5 text-left transition-colors",
-        isSelected ? "bg-muted/60" : "hover:bg-muted/40",
+        isSelected ? "bg-active-soft" : "hover:bg-muted",
       )}
     >
-      <Avatar className="size-10 shrink-0">
-        <AvatarFallback>
-          {contact.name
-            .split(" ")
-            .map((n) => n[0])
-            .join("")
-            .slice(0, 2)}
-        </AvatarFallback>
-      </Avatar>
+      <PersonAvatar
+        name={contact.name}
+        avatarUrl={contact.avatarUrl}
+        status={contact.status}
+        size="lg"
+        shape="square"
+        className="shrink-0"
+      />
       <div className="min-w-0 flex-1">
         <p className="truncate text-base font-medium">{contact.name}</p>
         <p className="truncate text-sm text-muted-foreground">{contact.company}</p>

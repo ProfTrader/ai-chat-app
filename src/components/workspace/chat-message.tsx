@@ -60,10 +60,10 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
 
       <div
         className={cn(
-          "max-w-[88%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+          "max-w-[88%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
           isUser
-            ? "bg-foreground text-background"
-            : "bg-chat-surface text-foreground ring-1 ring-border/60",
+            ? "bg-primary text-primary-foreground"
+            : "border border-message-incoming-border bg-message-incoming-bg text-foreground",
         )}
       >
         {isStreaming && !text ? (

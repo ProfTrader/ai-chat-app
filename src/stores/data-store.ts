@@ -18,6 +18,7 @@ import {
   mockTeamMembers,
   mockWorkspaces,
 } from "@/lib/mock-data";
+import { enrichContacts, enrichTeamMember } from "@/lib/person-profiles";
 
 interface DataState {
   initialized: boolean;
@@ -103,7 +104,7 @@ export const useDataStore = create<DataState>((set, get) => ({
           workspaces: data.workspaces ?? mockWorkspaces,
           projects: data.projects ?? mockProjects,
           tasks: data.tasks ?? mockTasks,
-          contacts: data.contacts ?? mockContacts,
+          contacts: enrichContacts(data.contacts ?? mockContacts),
           sessions: data.sessions ?? mockSessions,
           messages: data.messages ?? mockMessages,
           teamMembers: mockTeamMembers,
@@ -248,10 +249,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     get().tasks.filter((t) => t.projectId === projectId),
 
   getContactsByProject: (projectId) =>
-    get().contacts.filter((c) => c.projectId === projectId),
+    enrichContacts(get().contacts.filter((c) => c.projectId === projectId)),
 
   getTeamMembersByProject: (projectId) =>
-    get().teamMembers.filter((m) => m.projectId === projectId),
+    get()
+      .teamMembers.filter((m) => m.projectId === projectId)
+      .map(enrichTeamMember),
 
   getMessagesBySession: (sessionId) =>
     get().messages.filter((m) => m.sessionId === sessionId),

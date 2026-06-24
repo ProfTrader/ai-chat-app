@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Circle, CircleCheck, CircleDashed, ListTodo } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import {
   Empty,
   EmptyDescription,
@@ -9,10 +10,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { findMemberByAssignee } from "@/lib/team-utils";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
-import type { Task, TaskStatus } from "@/types";
+import type { PresenceStatus, Task, TaskStatus } from "@/types";
 
 const statusConfig: Record<
   TaskStatus,
@@ -23,7 +25,19 @@ const statusConfig: Record<
   done: { label: "Done", icon: CircleCheck },
 };
 
-function TaskRow({ task, isSelected }: { task: Task; isSelected: boolean }) {
+function TaskRow({
+  task,
+  isSelected,
+  assigneeName,
+  assigneeAvatarUrl,
+  assigneeStatus,
+}: {
+  task: Task;
+  isSelected: boolean;
+  assigneeName?: string;
+  assigneeAvatarUrl?: string;
+  assigneeStatus?: PresenceStatus;
+}) {
   const selectTask = useSelectionStore((s) => s.selectTask);
   const StatusIcon = statusConfig[task.status].icon;
 
@@ -33,7 +47,7 @@ function TaskRow({ task, isSelected }: { task: Task; isSelected: boolean }) {
       onClick={() => selectTask(task)}
       className={cn(
         "group flex w-full items-center gap-3 border-b border-border/50 px-5 py-3 text-left transition-colors",
-        isSelected ? "bg-muted/60" : "hover:bg-muted/40",
+        isSelected ? "bg-active-soft" : "hover:bg-muted",
       )}
     >
       <StatusIcon
@@ -48,6 +62,16 @@ function TaskRow({ task, isSelected }: { task: Task; isSelected: boolean }) {
         {task.identifier}
       </span>
       <span className="min-w-0 flex-1 truncate text-base">{task.title}</span>
+      {assigneeName && task.assignee ? (
+        <PersonAvatar
+          name={assigneeName}
+          avatarUrl={assigneeAvatarUrl}
+          status={assigneeStatus}
+          size="sm"
+          shape="square"
+          className="shrink-0"
+        />
+      ) : null}
       <Badge variant="outline" className="font-normal capitalize">
         {task.status.replace("_", " ")}
       </Badge>
@@ -61,7 +85,9 @@ function TaskRow({ task, isSelected }: { task: Task; isSelected: boolean }) {
 export function TaskList() {
   const { projectId, selectedTaskId } = useSelectionStore();
   const getTasksByProject = useDataStore((s) => s.getTasksByProject);
+  const getTeamMembersByProject = useDataStore((s) => s.getTeamMembersByProject);
   const tasks = getTasksByProject(projectId);
+  const members = getTeamMembersByProject(projectId);
 
   const grouped = useMemo(() => {
     const groups: Record<TaskStatus, Task[]> = {
@@ -102,17 +128,23 @@ export function TaskList() {
           const { label } = statusConfig[status];
           return (
             <section key={status}>
-              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-panel/95 px-5 py-2.5 backdrop-blur-sm">
+              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-pane px-5 py-2.5">
                 <span className="text-sm font-medium text-muted-foreground">{label}</span>
                 <span className="text-sm text-muted-foreground/60">{items.length}</span>
               </div>
-              {items.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  isSelected={task.id === selectedTaskId}
-                />
-              ))}
+              {items.map((task) => {
+                const assignee = findMemberByAssignee(members, task.assignee);
+                return (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    isSelected={task.id === selectedTaskId}
+                    assigneeName={assignee?.name ?? task.assignee}
+                    assigneeAvatarUrl={assignee?.avatarUrl}
+                    assigneeStatus={assignee?.status}
+                  />
+                );
+              })}
             </section>
           );
         })}

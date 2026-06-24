@@ -2,12 +2,14 @@ import { useEffect, useMemo } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { TitleBar } from "@/components/layout/icon-rail";
 import { StatusBar } from "@/components/layout/status-bar";
+import { TrialBanner } from "@/components/layout/trial-banner";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
 import { MainWorkspace } from "@/components/workspace/main-workspace";
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { SettingsSheet } from "@/components/settings/settings-sheet";
+import { ProfileSheet } from "@/components/profile/profile-sheet";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -52,12 +54,13 @@ export function AppShell() {
   }, [inspectorCollapsed, inspectorPanelRef]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-shell">
+      <TrialBanner />
       <TitleBar />
       <ResizablePanelGroup
         id="app-shell"
         orientation="horizontal"
-        className="min-h-0 flex-1"
+        className="min-h-0 flex-1 bg-shell"
         defaultLayout={defaultLayout}
         onLayoutChanged={(layout) => {
           if (typeof layout.nav === "number" && layout.nav > 0) {
@@ -81,7 +84,7 @@ export function AppShell() {
           <section
             aria-label="Navigation"
             aria-hidden={navCollapsed}
-            className="h-full min-h-0 min-w-0 overflow-hidden border-r border-border"
+            className="h-full min-h-0 min-w-0 overflow-hidden border-r border-border bg-pane"
           >
             <NavSidebar />
           </section>
@@ -90,7 +93,7 @@ export function AppShell() {
         <ResizableHandle withHandle />
 
         <ResizablePanel id="workspace" minSize="30%" className="min-h-0 min-w-0">
-          <section aria-label="Workspace" className="h-full min-h-0 min-w-0 overflow-hidden">
+          <section aria-label="Workspace" className="h-full min-h-0 min-w-0 overflow-hidden bg-pane">
             <MainWorkspace />
           </section>
         </ResizablePanel>
@@ -110,7 +113,7 @@ export function AppShell() {
           <section
             aria-label="Inspector"
             aria-hidden={inspectorCollapsed}
-            className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border"
+            className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-pane"
           >
             <InspectorPanel />
           </section>
@@ -120,6 +123,7 @@ export function AppShell() {
       <CommandPalette />
       <ShortcutsDialog />
       <SettingsSheet />
+      <ProfileSheet />
     </div>
   );
 }

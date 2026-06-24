@@ -7,6 +7,7 @@ import type {
   TeamMember,
   Workspace,
 } from "@/types";
+import { unsplashAvatars } from "@/lib/avatars";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws-1", name: "Acme Corp" },
@@ -91,6 +92,8 @@ export const mockTeamMembers: TeamMember[] = [
     name: "Alex",
     role: "Product Designer",
     email: "alex@acme.co",
+    avatarUrl: unsplashAvatars.alex,
+    status: "online",
   },
   {
     id: "member-2",
@@ -98,6 +101,8 @@ export const mockTeamMembers: TeamMember[] = [
     name: "Jordan",
     role: "Engineer",
     email: "jordan@acme.co",
+    avatarUrl: unsplashAvatars.jordan,
+    status: "busy",
   },
   {
     id: "member-3",
@@ -105,6 +110,8 @@ export const mockTeamMembers: TeamMember[] = [
     name: "Sam",
     role: "Marketing Lead",
     email: "sam@acme.co",
+    avatarUrl: unsplashAvatars.sarah,
+    status: "away",
   },
   {
     id: "member-4",
@@ -112,6 +119,8 @@ export const mockTeamMembers: TeamMember[] = [
     name: "Sam",
     role: "Sales Lead",
     email: "sam@acme.co",
+    avatarUrl: unsplashAvatars.sarah,
+    status: "away",
   },
   {
     id: "member-5",
@@ -119,6 +128,8 @@ export const mockTeamMembers: TeamMember[] = [
     name: "Alex",
     role: "Solutions Architect",
     email: "alex@acme.co",
+    avatarUrl: unsplashAvatars.alex,
+    status: "online",
   },
 ];
 
@@ -131,6 +142,8 @@ export const mockContacts: Contact[] = [
     email: "morgan@northwind.io",
     lastActivity: "2h ago",
     notes: "Interested in enterprise tier. Follow up after demo.",
+    avatarUrl: unsplashAvatars.morgan,
+    status: "online",
   },
   {
     id: "contact-2",
@@ -140,6 +153,8 @@ export const mockContacts: Contact[] = [
     email: "priya@helix.co",
     lastActivity: "1d ago",
     notes: "Requested custom integration timeline.",
+    avatarUrl: unsplashAvatars.priya,
+    status: "away",
   },
   {
     id: "contact-3",
@@ -148,6 +163,8 @@ export const mockContacts: Contact[] = [
     company: "Brightpath",
     email: "chris@brightpath.com",
     lastActivity: "3d ago",
+    avatarUrl: unsplashAvatars.chris,
+    status: "offline",
   },
   {
     id: "contact-4",
@@ -157,6 +174,8 @@ export const mockContacts: Contact[] = [
     email: "elena@summit.io",
     lastActivity: "1w ago",
     notes: "Champion for internal rollout.",
+    avatarUrl: unsplashAvatars.elena,
+    status: "busy",
   },
 ];
 

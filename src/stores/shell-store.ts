@@ -27,6 +27,7 @@ interface ShellState {
   commandOpen: boolean;
   shortcutsOpen: boolean;
   settingsOpen: boolean;
+  profileOpen: boolean;
   navPanelSize: number;
   inspectorPanelSize: number;
   setNavCollapsed: (collapsed: boolean) => void;
@@ -38,6 +39,7 @@ interface ShellState {
   setCommandOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setProfileOpen: (open: boolean) => void;
   setNavPanelSize: (size: number) => void;
   setInspectorPanelSize: (size: number) => void;
 }
@@ -52,6 +54,7 @@ export const useShellStore = create<ShellState>()(
       commandOpen: false,
       shortcutsOpen: false,
       settingsOpen: false,
+      profileOpen: false,
       navPanelSize: NAV_PANEL_DEFAULT,
       inspectorPanelSize: INSPECTOR_PANEL_DEFAULT,
       setNavCollapsed: (navCollapsed) => set({ navCollapsed }),
@@ -63,6 +66,7 @@ export const useShellStore = create<ShellState>()(
       setCommandOpen: (commandOpen) => set({ commandOpen }),
       setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+      setProfileOpen: (profileOpen) => set({ profileOpen }),
       setNavPanelSize: (navPanelSize) => set({ navPanelSize: normalizeNavPanelSize(navPanelSize) }),
       setInspectorPanelSize: (inspectorPanelSize) =>
         set({ inspectorPanelSize: normalizeInspectorPanelSize(inspectorPanelSize) }),

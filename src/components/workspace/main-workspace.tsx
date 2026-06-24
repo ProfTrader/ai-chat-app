@@ -13,6 +13,7 @@ import { useShellStore } from "@/stores/shell-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useDataStore } from "@/stores/data-store";
 import { useChatStore } from "@/stores/chat-store";
+import { cn } from "@/lib/utils";
 import type { ViewType } from "@/types";
 
 const viewTabs: { value: ViewType; label: string; icon: typeof MessageSquare }[] = [
@@ -32,7 +33,7 @@ export function MainWorkspace() {
   const project = projects.find((p) => p.id === projectId);
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col overflow-hidden bg-panel">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden bg-pane">
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="min-w-0">
           <p className="truncate text-base font-medium">
@@ -45,12 +46,18 @@ export function MainWorkspace() {
         </div>
         <div className="flex items-center gap-2">
           {activeView === "chat" && (
-            <Badge variant="outline" className="hidden font-normal sm:inline-flex">
+            <Badge
+              variant="outline"
+              className={cn(
+                "hidden font-normal sm:inline-flex",
+                composerMode === "auto" && "border-fin/30 text-fin",
+              )}
+            >
               {composerMode === "plan" ? "Plan mode" : "Auto mode"}
             </Badge>
           )}
           <Tabs value={activeView} onValueChange={(v) => setActiveView(v as ViewType)}>
-            <TabsList>
+            <TabsList variant="line">
               {viewTabs.map(({ value, label, icon: Icon }) => (
                 <TabsTrigger key={value} value={value}>
                   <Icon />

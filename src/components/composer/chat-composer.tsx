@@ -134,7 +134,10 @@ export function ChatComposer() {
                 ))}
               </ToggleGroup>
               <span className="hidden truncate pl-1 text-xs text-muted-foreground sm:inline">
-                Nexus · {composerMode === "plan" ? "Plan" : "Auto"}
+                Nexus ·{" "}
+                <span className={composerMode === "auto" ? "text-fin" : undefined}>
+                  {composerMode === "plan" ? "Plan" : "Auto"}
+                </span>
               </span>
             </div>
 

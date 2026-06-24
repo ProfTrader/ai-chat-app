@@ -1,4 +1,4 @@
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -7,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getInitials } from "@/lib/team-utils";
 import { cn } from "@/lib/utils";
 import { useSelectionStore } from "@/stores/selection-store";
 import type { Task, TeamMember } from "@/types";
@@ -34,8 +33,8 @@ export function KanbanCard({ task, assignee, isFiltered }: KanbanCardProps) {
       <Card
         size="sm"
         className={cn(
-          "cursor-pointer transition-shadow hover:ring-foreground/20",
-          isSelected && "ring-2 ring-ring",
+          "cursor-pointer ring-1 ring-border transition-shadow hover:shadow-[var(--shadow-pane)]",
+          isSelected && "ring-2 ring-active",
         )}
       >
         <CardHeader>
@@ -46,9 +45,13 @@ export function KanbanCard({ task, assignee, isFiltered }: KanbanCardProps) {
           <CardFooter className="flex items-center justify-between gap-2">
             {assignee ? (
               <div className="flex min-w-0 items-center gap-2">
-                <Avatar size="sm">
-                  <AvatarFallback>{getInitials(assignee.name)}</AvatarFallback>
-                </Avatar>
+                <PersonAvatar
+                  name={assignee.name}
+                  avatarUrl={assignee.avatarUrl}
+                  status={assignee.status}
+                  size="sm"
+                  shape="square"
+                />
                 <span className="truncate text-xs text-muted-foreground">
                   {assignee.name}
                 </span>

@@ -9,7 +9,7 @@ export function TitleBar() {
 
   return (
     <header
-      className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-sidebar px-4"
+      className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-pane px-4"
       data-tauri-drag-region
     >
       <div className="flex items-center gap-2">
@@ -22,7 +22,7 @@ export function TitleBar() {
         >
           <PanelLeft />
         </Button>
-        <span className="text-sm font-medium text-muted-foreground">Nexus CRM</span>
+        <span className="text-sm font-medium text-foreground/80">Nexus CRM</span>
       </div>
       <div className="flex items-center gap-2">
         <Button

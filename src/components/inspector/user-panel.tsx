@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { getInitials } from "@/lib/team-utils";
+import { presenceLabels } from "@/lib/avatars";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -44,15 +44,26 @@ export function UserPanel({ member }: UserPanelProps) {
   }, [assignedTasks]);
 
   return (
-    <div className="flex h-full flex-col bg-sidebar">
+    <div className="flex h-full flex-col bg-pane">
       <div className="border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
-          <Avatar size="lg">
-            <AvatarFallback>{getInitials(member.name)}</AvatarFallback>
-          </Avatar>
+          <PersonAvatar
+            name={member.name}
+            avatarUrl={member.avatarUrl}
+            status={member.status}
+            size="lg"
+            shape="square"
+            imageSize={128}
+            className="size-12"
+          />
           <div className="min-w-0">
             <h2 className="truncate text-base font-medium">{member.name}</h2>
             <p className="truncate text-sm text-muted-foreground">{member.role}</p>
+            {member.status ? (
+              <Badge variant="secondary" className="mt-1.5">
+                {presenceLabels[member.status]}
+              </Badge>
+            ) : null}
           </div>
         </div>
       </div>
@@ -97,8 +108,8 @@ export function UserPanel({ member }: UserPanelProps) {
                     type="button"
                     onClick={() => selectTask(task)}
                     className={cn(
-                      "flex w-full flex-col gap-0.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60",
-                      task.id === selectedTaskId && "bg-muted/60",
+                      "flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-muted",
+                      task.id === selectedTaskId && "bg-active-soft",
                     )}
                   >
                     <span className="font-mono text-xs text-muted-foreground">
