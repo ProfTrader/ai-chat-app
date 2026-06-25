@@ -1,4 +1,3 @@
-import { createUIMessageStream, generateId } from "ai";
 import type { ChatContext } from "./context.js";
 import { buildSystemPrompt } from "./context.js";
 
@@ -46,12 +45,13 @@ export async function validateOllamaModel(model = resolveOllamaModel()) {
   }
 }
 
-export function createOllamaChatStream(options: {
+export async function createOllamaChatStream(options: {
   baseUrl: string;
   model: string;
   userMessage: string;
   context: ChatContext;
 }) {
+  const { createUIMessageStream, generateId } = await import("ai");
   const systemPrompt = buildSystemPrompt(options.context);
 
   return createUIMessageStream({

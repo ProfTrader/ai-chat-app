@@ -34,7 +34,7 @@ export function MainWorkspace() {
   const project = projects.find((p) => p.id === projectId);
   const workspaceTitle =
     activeView === "nodes"
-      ? "Customer reply agent"
+      ? "Workforce agent builder"
       : session?.title ?? project?.name ?? "Workspace";
 
   return (
@@ -44,7 +44,7 @@ export function MainWorkspace() {
           <p className="truncate text-lg font-semibold">{workspaceTitle}</p>
           <p className="truncate text-xs text-muted-foreground">
             {activeView === "nodes"
-              ? "Agent builder - draft workflow"
+              ? "Enterprise agent blueprint - internal workforce first"
               : `${project?.name ?? "Select a project"}${session ? ` - ${session.title}` : ""}`}
           </p>
         </div>

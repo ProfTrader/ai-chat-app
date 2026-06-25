@@ -60,7 +60,7 @@ const primaryViews: {
   { value: "tasks", label: "Tasks", icon: ListTodo },
   { value: "board", label: "Board", icon: Columns3 },
   { value: "contacts", label: "Contacts", icon: ContactRound },
-  { value: "nodes", label: "Node manager", icon: Network },
+  { value: "nodes", label: "Agent builder", icon: Network },
 ];
 
 const sharedViews: { label: string; icon: LucideIcon }[] = [

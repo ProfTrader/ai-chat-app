@@ -1,23 +1,27 @@
-import { Agent, Cursor } from "@cursor/sdk";
-import { createUIMessageStream, generateId } from "ai";
 import type { ChatContext } from "./context.js";
 import { buildSystemPrompt } from "./context.js";
 
 export async function validateCursorApiKey(apiKey: string) {
+  const { Cursor } = await import("@cursor/sdk");
   const user = await Cursor.me({ apiKey });
   return user;
 }
 
 export async function listCursorModels(apiKey: string) {
+  const { Cursor } = await import("@cursor/sdk");
   return Cursor.models.list({ apiKey });
 }
 
-export function createCursorChatStream(options: {
+export async function createCursorChatStream(options: {
   apiKey: string;
   model: string;
   userMessage: string;
   context: ChatContext;
 }) {
+  const [{ Agent }, { createUIMessageStream, generateId }] = await Promise.all([
+    import("@cursor/sdk"),
+    import("ai"),
+  ]);
   const systemPrompt = buildSystemPrompt(options.context);
   const prompt = `${systemPrompt}\n\nUser message:\n${options.userMessage}`;
 

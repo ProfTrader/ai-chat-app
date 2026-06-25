@@ -1,0 +1,1062 @@
+import {
+  Bot,
+  BriefcaseBusiness,
+  Building2,
+  Banknote,
+  Calculator,
+  CheckCircle2,
+  ClipboardCheck,
+  ClipboardList,
+  Clock3,
+  Database,
+  FileSearch,
+  FlaskConical,
+  GitBranch,
+  History,
+  Headphones,
+  HeartHandshake,
+  KeyRound,
+  Landmark,
+  Layers3,
+  MonitorCog,
+  MessageSquare,
+  Network,
+  Play,
+  RefreshCw,
+  ReceiptText,
+  Scale,
+  Send,
+  ShieldCheck,
+  Sigma,
+  ScanSearch,
+  UserCheck,
+  Users,
+  Variable,
+  Wrench,
+} from "lucide-react";
+import type {
+  AgentBlueprint,
+  AgentDomainPack,
+  AgentGraphNode,
+  AgentRole,
+  DataAccessPolicy,
+  DeploymentTarget,
+  DeploymentTargetId,
+  Edge,
+  EvaluationConfig,
+  IterationPolicy,
+  LibraryMenu,
+  LibraryNode,
+  NodePanel,
+  SpecialistAgent,
+} from "@/lib/agents/types";
+
+const internalDataPolicy: DataAccessPolicy = {
+  classification: "internal",
+  sources: "Workspace tasks, uploaded documents, approved internal tools",
+  retention: "30 days trace retention",
+};
+
+const restrictedDataPolicy: DataAccessPolicy = {
+  classification: "restricted",
+  sources: "Entitled banking systems, policy documents, case files",
+  retention: "Audit retention per banking policy",
+};
+
+const defaultEvaluation: EvaluationConfig = {
+  suite: "Workforce baseline",
+  required: true,
+  criteria: ["task success", "policy adherence", "tool approval", "trace completeness"],
+};
+
+const defaultIteration: IterationPolicy = {
+  maxIterations: 3,
+  successCriteria: "Required output is complete, sourced, and ready for review.",
+  failurePath: "Escalate to human review with a trace summary.",
+};
+
+export const specialistAgents: SpecialistAgent[] = [
+  {
+    id: "accounts-agent",
+    name: "Accounts Agent",
+    domain: "Accounts",
+    description: "Handles invoices, receivables, payables, account records, and billing support.",
+    tools: ["invoice lookup", "account ledger", "billing task writer"],
+    dataPolicy: internalDataPolicy,
+    approvalPolicy: {
+      mode: "human-review",
+      approver: "Accounts lead",
+      requiredFor: "Payment-impacting changes and external billing messages",
+    },
+    handoffRules: "Escalate disputed balances, missing invoices, or payment changes to Finance.",
+  },
+  {
+    id: "support-agent",
+    name: "Support Agent",
+    domain: "Support",
+    description: "Triages internal support requests, summarizes cases, looks up knowledge, and drafts customer extensions.",
+    tools: ["case search", "knowledge base", "support task writer"],
+    dataPolicy: internalDataPolicy,
+    approvalPolicy: {
+      mode: "human-review",
+      approver: "Support lead",
+      requiredFor: "Customer-facing drafts and case status changes",
+    },
+    handoffRules: "Escalate account, legal, tax, or high-severity operational issues to the matching specialist.",
+  },
+  {
+    id: "tax-agent",
+    name: "Tax Agent",
+    domain: "Tax",
+    description: "Reviews tax documents, jurisdiction prompts, filing checklists, and tax escalation paths.",
+    tools: ["tax document search", "jurisdiction checklist", "filing task writer"],
+    dataPolicy: restrictedDataPolicy,
+    approvalPolicy: {
+      mode: "compliance-review",
+      approver: "Tax reviewer",
+      requiredFor: "Tax interpretation, filing guidance, and external output",
+    },
+    handoffRules: "Escalate uncertain jurisdiction, filing, or legal exposure to Tax reviewer and Legal.",
+  },
+  {
+    id: "legal-agent",
+    name: "Legal Agent",
+    domain: "Legal",
+    description: "Summarizes contracts, finds clauses, prepares legal intake, and routes review.",
+    tools: ["contract search", "clause library", "legal intake"],
+    dataPolicy: restrictedDataPolicy,
+    approvalPolicy: {
+      mode: "compliance-review",
+      approver: "Legal reviewer",
+      requiredFor: "Legal interpretation and customer-facing contractual language",
+    },
+    handoffRules: "Escalate negotiation, liability, or regulatory questions to Legal reviewer.",
+  },
+  {
+    id: "hr-agent",
+    name: "HR Agent",
+    domain: "HR",
+    description: "Answers employee policy questions, supports onboarding, PTO, benefits, and HR case routing.",
+    tools: ["policy search", "HR case writer", "onboarding checklist"],
+    dataPolicy: {
+      ...internalDataPolicy,
+      classification: "confidential",
+      sources: "HR policies, employee-facing benefits docs, approved onboarding checklists",
+    },
+    approvalPolicy: {
+      mode: "human-review",
+      approver: "HR partner",
+      requiredFor: "Employee-specific advice and confidential case updates",
+    },
+    handoffRules: "Escalate employee relations, compensation, and sensitive personal topics to HR partner.",
+  },
+  {
+    id: "finance-agent",
+    name: "Finance Agent",
+    domain: "Finance",
+    description: "Handles approvals, budget lookup, reconciliation support, and variance summaries.",
+    tools: ["budget lookup", "approval queue", "reconciliation worksheet"],
+    dataPolicy: restrictedDataPolicy,
+    approvalPolicy: {
+      mode: "manager-review",
+      approver: "Finance manager",
+      requiredFor: "Budget changes, approvals, and financial statements",
+    },
+    handoffRules: "Escalate payment, accounting policy, or material variance questions to Finance manager.",
+  },
+  {
+    id: "it-agent",
+    name: "IT Agent",
+    domain: "IT",
+    description: "Triages access requests, tickets, runbook lookup, and incident handoff.",
+    tools: ["ticket search", "access request", "runbook lookup"],
+    dataPolicy: internalDataPolicy,
+    approvalPolicy: {
+      mode: "manager-review",
+      approver: "IT owner",
+      requiredFor: "Permission changes and privileged access",
+    },
+    handoffRules: "Escalate security, outage, or privileged-access requests to IT owner.",
+  },
+  {
+    id: "operations-agent",
+    name: "Operations Agent",
+    domain: "Operations",
+    description: "Routes tasks, executes SOPs, schedules follow-ups, and reports work status.",
+    tools: ["SOP library", "task writer", "status reporter"],
+    dataPolicy: internalDataPolicy,
+    approvalPolicy: {
+      mode: "human-review",
+      approver: "Ops lead",
+      requiredFor: "External commitments and workflow-impacting changes",
+    },
+    handoffRules: "Escalate domain-specific work to the relevant specialist and track the owner.",
+  },
+  {
+    id: "compliance-agent",
+    name: "Compliance Agent",
+    domain: "Compliance",
+    description: "Runs policy checks, restricted data handling, review gates, and audit evidence capture.",
+    tools: ["policy library", "control checklist", "audit evidence writer"],
+    dataPolicy: restrictedDataPolicy,
+    approvalPolicy: {
+      mode: "compliance-review",
+      approver: "Compliance reviewer",
+      requiredFor: "Policy exceptions, restricted data use, and customer-facing regulated output",
+    },
+    handoffRules: "Escalate failed controls, missing evidence, and exceptions to Compliance reviewer.",
+  },
+  {
+    id: "data-research-agent",
+    name: "Data/Research Agent",
+    domain: "Data and research",
+    description: "Answers document questions, looks up data, synthesizes findings, and cites sources.",
+    tools: ["document search", "data lookup", "source summarizer"],
+    dataPolicy: internalDataPolicy,
+    approvalPolicy: {
+      mode: "none",
+      approver: "Not required",
+      requiredFor: "Low-risk internal read-only research",
+    },
+    handoffRules: "Escalate unsupported claims, restricted data, and ambiguous metrics to a domain specialist.",
+  },
+];
+
+export const nodePanels: { id: NodePanel; label: string }[] = [
+  { id: "ai", label: "AI" },
+  { id: "action", label: "Action" },
+  { id: "time", label: "Time" },
+  { id: "review", label: "Review" },
+];
+
+export const libraryMenus: { id: LibraryMenu; label: string; categories: string[] }[] = [
+  { id: "templates", label: "Process", categories: [] },
+  { id: "packs", label: "Packs", categories: [] },
+  { id: "agents", label: "Agents", categories: ["Specialist"] },
+  { id: "tools", label: "Data/tools", categories: ["Knowledge", "Data", "Memory", "Tool", "Automation"] },
+  { id: "governance", label: "Govern", categories: ["Orchestration", "Logic", "Guardrail", "Approval", "Evaluation", "Audit", "Output"] },
+  { id: "data", label: "Blocks", categories: ["Input", "Agent"] },
+];
+
+export const deploymentTargets: DeploymentTarget[] = [
+  {
+    id: "internal-workspace",
+    label: "Internal workspace",
+    description: "Available to employees inside Nexus with workspace permissions.",
+    status: "available",
+    requiredControls: ["baseline eval", "trace logging"],
+  },
+  {
+    id: "team-assistant",
+    label: "Team assistant",
+    description: "Pinned to a team space for shared tasks, docs, and follow-ups.",
+    status: "available",
+    requiredControls: ["owner", "knowledge scope", "baseline eval"],
+  },
+  {
+    id: "tool-runner",
+    label: "Tool/action runner",
+    description: "Executes approved internal tools with human review on writes.",
+    status: "available",
+    requiredControls: ["tool approval", "audit trail"],
+  },
+  {
+    id: "customer-channel",
+    label: "Customer-facing channel",
+    description: "External deployment target gated by privacy, approval, audit, and eval checks.",
+    status: "locked",
+    requiredControls: ["privacy guardrail", "human approval", "audit trail", "customer eval suite"],
+  },
+];
+
+export const domainPacks: AgentDomainPack[] = [
+  {
+    id: "basic-workforce",
+    label: "Basic Workforce",
+    description: "General productivity agents for task triage, docs, summaries, approvals, and follow-ups.",
+    defaultNodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "orchestrator",
+      "operations-agent",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+    requiredControls: ["baseline eval", "trace logging", "human review for writes"],
+    riskTier: "medium",
+  },
+  {
+    id: "banking",
+    label: "Banking",
+    description: "Restricted enterprise pack for KYC ops, account ops, compliance review, and auditable escalation.",
+    defaultNodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "entitlement",
+      "policy-check",
+      "orchestrator",
+      "accounts-agent",
+      "tax-agent",
+      "compliance-agent",
+      "work-loop",
+      "guardrail",
+      "approval",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+    requiredControls: ["entitlement check", "restricted data policy", "compliance review", "audit trail"],
+    riskTier: "high",
+  },
+];
+
+const specialistIconMap = {
+  "accounts-agent": Calculator,
+  "support-agent": Headphones,
+  "tax-agent": ReceiptText,
+  "legal-agent": Scale,
+  "hr-agent": HeartHandshake,
+  "finance-agent": Banknote,
+  "it-agent": MonitorCog,
+  "operations-agent": ClipboardCheck,
+  "compliance-agent": ShieldCheck,
+  "data-research-agent": FileSearch,
+};
+
+const specialistLibraryNodes: LibraryNode[] = specialistAgents.map((agent) => ({
+  id: agent.id,
+  title: agent.name,
+  category: "Specialist",
+  description: agent.description,
+  icon: specialistIconMap[agent.id as keyof typeof specialistIconMap] ?? Bot,
+  inputs: ["json", "policy", "memory"],
+  outputs: ["json", "text"],
+  requiredConfig: ["Domain description", "Input contract", "Output contract", "Handoff rule"],
+  outputSchema: "{ result: string, confidence: number, handoff_needed: boolean, evidence: object }",
+  risk: agent.dataPolicy.classification === "restricted" ? "high" : "medium",
+}));
+
+export const libraryNodes: LibraryNode[] = [
+  {
+    id: "action-trigger",
+    title: "Action trigger",
+    category: "Input",
+    description: "Starts when a prompt, document, or work request is submitted.",
+    icon: Play,
+    inputs: [],
+    outputs: ["text", "json"],
+    requiredConfig: ["Trigger source", "Action variable", "Document scope"],
+    outputSchema: "{ action: string, source_type: enum, document_refs: string[] }",
+    risk: "low",
+  },
+  {
+    id: "action-inspector",
+    title: "Action inspector",
+    category: "Orchestration",
+    description: "Inspects the action and determines interpretation, expected output, and work plan.",
+    icon: ScanSearch,
+    inputs: ["text", "json"],
+    outputs: ["json"],
+    requiredConfig: ["Interpretation rule", "Output target", "Work breakdown"],
+    outputSchema: "{ interpretation: string, expected_output: string, work_items: object[] }",
+    risk: "medium",
+  },
+  {
+    id: "orchestrator",
+    title: "Orchestrator",
+    category: "Orchestration",
+    description: "Manager-led agent that delegates work to specialists and decides the next step.",
+    icon: Network,
+    inputs: ["json", "policy", "memory"],
+    outputs: ["json", "tool"],
+    requiredConfig: ["Delegation rule", "Specialist roster", "Success criteria", "Failure path"],
+    outputSchema: "{ assignments: object[], next_specialist: string, status: enum }",
+    risk: "medium",
+  },
+  {
+    id: "specialist-agent",
+    title: "Specialist agent",
+    category: "Specialist",
+    description: "Configurable domain agent for assigned work, evidence, and handoff decisions.",
+    icon: Bot,
+    inputs: ["json", "policy", "memory"],
+    outputs: ["json", "text"],
+    requiredConfig: ["Domain description", "Input contract", "Output contract", "Handoff rule"],
+    outputSchema: "{ result: string, confidence: number, handoff_needed: boolean, evidence: object }",
+    risk: "medium",
+  },
+  {
+    id: "work-loop",
+    title: "Work loop",
+    category: "Logic",
+    description: "Loops specialist work until success criteria pass or max iterations are reached.",
+    icon: RefreshCw,
+    inputs: ["json"],
+    outputs: ["json"],
+    requiredConfig: ["Max iterations", "Success criteria", "Failure path"],
+    outputSchema: "{ iteration: number, complete: boolean, reason: string }",
+    risk: "medium",
+  },
+  {
+    id: "success-evaluator",
+    title: "Success evaluator",
+    category: "Evaluation",
+    description: "Determines whether the work is complete, compliant, and ready to finish.",
+    icon: CheckCircle2,
+    inputs: ["json", "policy"],
+    outputs: ["json", "policy"],
+    requiredConfig: ["Eval suite", "Passing score", "Success criteria", "Failure path"],
+    outputSchema: "{ success: boolean, score: number, gaps: string[], finish_ready: boolean }",
+    risk: "low",
+  },
+  {
+    id: "finish-handoff",
+    title: "Finish / handoff",
+    category: "Output",
+    description: "Finishes successful work or escalates with trace, owner, and unresolved gaps.",
+    icon: Send,
+    inputs: ["text", "json", "policy"],
+    outputs: ["text"],
+    requiredConfig: ["Success output", "Fallback output", "Escalation owner"],
+    outputSchema: "{ final_message: string, outcome: enum, escalation_owner?: string }",
+    risk: "medium",
+  },
+  {
+    id: "start",
+    title: "Work intake",
+    category: "Input",
+    description: "Collects the employee request, role context, workspace, and task metadata.",
+    icon: Play,
+    inputs: [],
+    outputs: ["text", "json"],
+    requiredConfig: ["Input variable", "Requester context", "Workspace scope"],
+    outputSchema: "{ request: string, requester_role: string, workspace_id: string }",
+    risk: "low",
+  },
+  {
+    id: "agent",
+    title: "Workforce agent",
+    category: "Agent",
+    description: "Defines the agent's role, instructions, model behavior, tools, and output contract.",
+    icon: Bot,
+    inputs: ["text", "json", "memory", "policy"],
+    outputs: ["json", "text"],
+    requiredConfig: ["Model", "Instructions", "Output schema"],
+    outputSchema: "{ answer: string, next_action: enum, confidence: number }",
+    risk: "medium",
+  },
+  {
+    id: "banking-agent",
+    title: "Banking operations agent",
+    category: "Agent",
+    description: "Handles restricted banking workflows with policy grounding and escalation defaults.",
+    icon: Landmark,
+    inputs: ["text", "json", "policy", "memory"],
+    outputs: ["json", "text"],
+    requiredConfig: ["Model", "Banking policy scope", "Escalation rules", "Output schema"],
+    outputSchema: "{ case_summary: string, risk_flag: enum, escalation_needed: boolean }",
+    risk: "high",
+  },
+  {
+    id: "note",
+    title: "Team note",
+    category: "Input",
+    description: "Adds internal commentary without changing workflow execution.",
+    icon: MessageSquare,
+    inputs: [],
+    outputs: [],
+    requiredConfig: ["Comment"],
+    outputSchema: "non-executable",
+    risk: "low",
+  },
+  {
+    id: "knowledge",
+    title: "Knowledge source",
+    category: "Knowledge",
+    description: "Grounds the agent in approved documents, workspace files, and enterprise sources.",
+    icon: FileSearch,
+    inputs: ["text"],
+    outputs: ["json"],
+    requiredConfig: ["Source", "Access rule", "Retrieval query"],
+    outputSchema: "{ sources: Array<{ title: string, excerpt: string, access: string }> }",
+    risk: "medium",
+  },
+  {
+    id: "tool",
+    title: "Tool action",
+    category: "Tool",
+    description: "Calls an approved internal connector or MCP tool with scoped permissions.",
+    icon: Wrench,
+    inputs: ["json", "tool", "policy"],
+    outputs: ["json"],
+    requiredConfig: ["Tool catalog", "Action", "Approval"],
+    outputSchema: "{ status: enum, payload: object, audit_id: string }",
+    risk: "high",
+  },
+  {
+    id: "guardrail",
+    title: "Privacy guardrail",
+    category: "Guardrail",
+    description: "Checks PII, prompt injection, policy boundaries, and customer-channel readiness.",
+    icon: ShieldCheck,
+    inputs: ["text", "json"],
+    outputs: ["policy"],
+    requiredConfig: ["PII policy", "Injection policy", "Failure path"],
+    outputSchema: "{ pass: boolean, reason: string, redactions: string[] }",
+    risk: "medium",
+  },
+  {
+    id: "policy-check",
+    title: "Policy check",
+    category: "Guardrail",
+    description: "Verifies the request against domain policy before action or external response.",
+    icon: ClipboardList,
+    inputs: ["json", "text"],
+    outputs: ["policy", "json"],
+    requiredConfig: ["Policy library", "Decision rule", "Failure path"],
+    outputSchema: "{ allowed: boolean, policy_refs: string[], reason: string }",
+    risk: "high",
+  },
+  {
+    id: "entitlement",
+    title: "Entitlement check",
+    category: "Guardrail",
+    description: "Confirms the requester can access the data, tool, account, or case being used.",
+    icon: KeyRound,
+    inputs: ["json"],
+    outputs: ["policy"],
+    requiredConfig: ["Identity source", "Entitlement rule", "Denied path"],
+    outputSchema: "{ entitled: boolean, entitlement_id: string, reason: string }",
+    risk: "high",
+  },
+  {
+    id: "router",
+    title: "Decision router",
+    category: "Logic",
+    description: "Routes the agent path based on structured intent, risk, or missing information.",
+    icon: GitBranch,
+    inputs: ["json", "policy"],
+    outputs: ["json"],
+    requiredConfig: ["Condition", "Fallback path"],
+    outputSchema: "{ branch: enum, reason: string }",
+    risk: "medium",
+  },
+  {
+    id: "loop",
+    title: "Iteration loop",
+    category: "Logic",
+    description: "Repeats a step until completion or until a strict iteration limit is reached.",
+    icon: RefreshCw,
+    inputs: ["json"],
+    outputs: ["json"],
+    requiredConfig: ["Condition", "Max iterations"],
+    outputSchema: "{ continue: boolean, iteration: number, state: object }",
+    risk: "medium",
+  },
+  {
+    id: "wait",
+    title: "Wait / schedule",
+    category: "Automation",
+    description: "Pauses, schedules, or resumes follow-up work across employee workflows.",
+    icon: Clock3,
+    inputs: ["json"],
+    outputs: ["json"],
+    requiredConfig: ["Delay", "Timezone", "Resume condition"],
+    outputSchema: "{ resume_at: string, timezone: string, state: object }",
+    risk: "low",
+  },
+  {
+    id: "approval",
+    title: "Human approval",
+    category: "Approval",
+    description: "Pauses high-impact tool actions, restricted data use, or customer-facing sends.",
+    icon: UserCheck,
+    inputs: ["json", "text"],
+    outputs: ["policy"],
+    requiredConfig: ["Approval prompt", "Approver role", "Rejected path"],
+    outputSchema: "{ approved: boolean, approver_id: string, comment: string }",
+    risk: "low",
+  },
+  {
+    id: "transform",
+    title: "Transform",
+    category: "Data",
+    description: "Normalizes inputs and outputs into a stable downstream data contract.",
+    icon: Sigma,
+    inputs: ["json"],
+    outputs: ["json"],
+    requiredConfig: ["Input shape", "Output shape"],
+    outputSchema: "{ normalized: object, errors: string[] }",
+    risk: "low",
+  },
+  {
+    id: "memory",
+    title: "Memory / state",
+    category: "Memory",
+    description: "Stores approved workflow state for reuse across steps or future sessions.",
+    icon: Variable,
+    inputs: ["json", "memory"],
+    outputs: ["memory"],
+    requiredConfig: ["State key", "Retention", "Access scope"],
+    outputSchema: "{ key: string, value: object, expires_at: string }",
+    risk: "medium",
+  },
+  {
+    id: "evaluation",
+    title: "Evaluation suite",
+    category: "Evaluation",
+    description: "Scores task success, policy adherence, approval handling, and trace quality.",
+    icon: FlaskConical,
+    inputs: ["json", "policy"],
+    outputs: ["json"],
+    requiredConfig: ["Eval suite", "Passing score", "Failure owner"],
+    outputSchema: "{ passed: boolean, score: number, failed_checks: string[] }",
+    risk: "low",
+  },
+  {
+    id: "audit",
+    title: "Audit trail",
+    category: "Audit",
+    description: "Records decisions, tool calls, approvals, data access, and deployment evidence.",
+    icon: History,
+    inputs: ["json", "policy", "tool"],
+    outputs: ["json"],
+    requiredConfig: ["Log destination", "Retention", "Evidence fields"],
+    outputSchema: "{ audit_id: string, retained_until: string, evidence: object }",
+    risk: "low",
+  },
+  {
+    id: "output",
+    title: "Output",
+    category: "Output",
+    description: "Returns a final internal answer, task update, tool result, or reviewed customer draft.",
+    icon: Send,
+    inputs: ["text", "json", "policy"],
+    outputs: ["text"],
+    requiredConfig: ["Format", "Review policy", "Deployment target"],
+    outputSchema: "{ message: string, next_action: string, audience: enum }",
+    risk: "medium",
+  },
+  {
+    id: "data-source",
+    title: "Enterprise data",
+    category: "Data",
+    description: "Connects to approved internal systems with access rules and data classification.",
+    icon: Database,
+    inputs: ["json"],
+    outputs: ["json"],
+    requiredConfig: ["System", "Access rule", "Classification"],
+    outputSchema: "{ records: object[], classification: string, access_scope: string }",
+    risk: "high",
+  },
+  ...specialistLibraryNodes,
+];
+
+export const workflowTemplates = [
+  {
+    label: "Manager-led work process",
+    description: "Trigger, inspect, delegate to specialists, loop until done, evaluate, then finish or escalate.",
+    domainPackId: "basic-workforce",
+    icon: Network,
+    nodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "orchestrator",
+      "operations-agent",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+  },
+  {
+    label: "Accounts + Support + Tax",
+    description: "Route account, support, and tax work through specialist agents with review and evidence.",
+    domainPackId: "basic-workforce",
+    icon: Calculator,
+    nodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "orchestrator",
+      "accounts-agent",
+      "support-agent",
+      "tax-agent",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+  },
+  {
+    label: "Document-to-action process",
+    description: "Inspect a prompt or document, research sources, assign work, and finish with a trace.",
+    domainPackId: "basic-workforce",
+    icon: FileSearch,
+    nodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "knowledge",
+      "orchestrator",
+      "data-research-agent",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+  },
+  {
+    label: "Tool action process",
+    description: "Delegate action work to specialists, require approval, call tools, evaluate, and audit.",
+    domainPackId: "basic-workforce",
+    icon: Wrench,
+    nodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "orchestrator",
+      "operations-agent",
+      "approval",
+      "tool",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+  },
+  {
+    label: "Banking specialist process",
+    description: "Coordinate accounts, tax, compliance, and support with restricted controls and escalation.",
+    domainPackId: "banking",
+    icon: Landmark,
+    nodeIds: [
+      "action-trigger",
+      "action-inspector",
+      "entitlement",
+      "policy-check",
+      "orchestrator",
+      "accounts-agent",
+      "tax-agent",
+      "compliance-agent",
+      "approval",
+      "work-loop",
+      "success-evaluator",
+      "audit",
+      "finish-handoff",
+    ],
+  },
+];
+
+export const runEvents = [
+  { label: "Action trigger", state: "complete", time: "12 ms" },
+  { label: "Action inspector", state: "complete", time: "64 ms" },
+  { label: "Orchestrator", state: "running", time: "now" },
+  { label: "Specialist agent", state: "queued", time: "next" },
+  { label: "Work loop", state: "waiting", time: "iteration" },
+  { label: "Finish / handoff", state: "queued", time: "after eval" },
+];
+
+function inferAgentRole(template: LibraryNode): AgentRole {
+  if (template.id === "orchestrator") return "orchestrator";
+  if (["action-trigger", "action-inspector"].includes(template.id)) return "inspector";
+  if (template.category === "Specialist" || template.id.endsWith("-agent")) return "specialist";
+  if (["evaluation", "success-evaluator", "guardrail", "policy-check", "approval", "audit", "work-loop", "loop"].includes(template.id)) {
+    return "reviewer";
+  }
+  if (["finish-handoff", "output"].includes(template.id)) return "finisher";
+  return "specialist";
+}
+
+export function createDraftNode(
+  template: LibraryNode,
+  index: number,
+  position?: { x: number; y: number },
+): AgentGraphNode {
+  const isRestricted =
+    template.risk === "high" || ["banking-agent", "entitlement", "policy-check"].includes(template.id);
+  const specialist = specialistAgents.find((agent) => agent.id === template.id);
+
+  return {
+    ...template,
+    id: `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    templateId: template.id,
+    title: template.title,
+    x: position?.x ?? 128 + (index % 4) * 280,
+    y: position?.y ?? 430 + Math.floor(index / 4) * 180,
+    status: "draft",
+    panel:
+      template.category === "Tool" || template.category === "Output"
+        ? "action"
+        : template.category === "Logic" || template.category === "Automation"
+          ? "time"
+          : ["Guardrail", "Approval", "Evaluation", "Audit"].includes(template.category)
+            ? "review"
+            : "ai",
+    purpose: "",
+    instructions: "",
+    config: specialist
+      ? [
+          { label: "Domain description", value: specialist.description },
+          { label: "Input contract", value: "Assigned work item, source context, policy constraints" },
+          { label: "Output contract", value: template.outputSchema },
+          { label: "Handoff rule", value: specialist.handoffRules },
+        ]
+      : template.requiredConfig.map((label) => ({ label, value: "" })),
+    dataAccess: specialist?.dataPolicy ?? (isRestricted ? restrictedDataPolicy : internalDataPolicy),
+    approval: specialist?.approvalPolicy ?? {
+      mode: template.risk === "high" ? "human-review" : "none",
+      approver: template.risk === "high" ? "Ops lead" : "Not required",
+      requiredFor: template.risk === "high" ? "Writes, restricted data, customer-facing output" : "Low-risk internal reads",
+    },
+    evaluation: defaultEvaluation,
+    deploymentTargets: ["internal-workspace"],
+    agentRole: inferAgentRole(template),
+    specialist,
+    orchestrationStrategy: template.id === "orchestrator" ? "manager-led" : undefined,
+    delegationRule:
+      template.id === "orchestrator"
+        ? "Inspect work items, select the best specialist by domain, and route gaps back through the loop."
+        : specialist
+          ? `Accept ${specialist.domain} work from the orchestrator and return evidence-backed output.`
+          : "Use upstream structured context and pass a typed result downstream.",
+    iteration: defaultIteration,
+    handoffRule: specialist?.handoffRules ?? "Escalate unresolved or high-risk work to human review.",
+  };
+}
+
+const nodeById = new Map(libraryNodes.map((node) => [node.id, node]));
+
+function starterNode(
+  templateId: string,
+  patch: Partial<AgentGraphNode>,
+): AgentGraphNode {
+  const template = nodeById.get(templateId);
+  if (!template) throw new Error(`Missing node template: ${templateId}`);
+  const draft = createDraftNode(template, 0);
+  return {
+    ...draft,
+    ...patch,
+    templateId,
+    config: patch.config ?? draft.config,
+    dataAccess: patch.dataAccess ?? draft.dataAccess,
+    approval: patch.approval ?? draft.approval,
+    evaluation: patch.evaluation ?? draft.evaluation,
+    agentRole: patch.agentRole ?? draft.agentRole,
+    specialist: patch.specialist ?? draft.specialist,
+    orchestrationStrategy: patch.orchestrationStrategy ?? draft.orchestrationStrategy,
+    delegationRule: patch.delegationRule ?? draft.delegationRule,
+    iteration: patch.iteration ?? draft.iteration,
+    handoffRule: patch.handoffRule ?? draft.handoffRule,
+  };
+}
+
+export const initialNodes: AgentGraphNode[] = [
+  starterNode("action-trigger", {
+    id: "n1",
+    title: "When action is given",
+    x: 72,
+    y: 224,
+    status: "live",
+    purpose: "Start the process when a prompt, document, or work request is submitted.",
+    instructions: "Capture the action, source type, document references, requester role, and workspace context.",
+    config: [
+      { label: "Trigger source", value: "Prompt, document, or chat-created draft" },
+      { label: "Action variable", value: "requested_action" },
+      { label: "Document scope", value: "Uploaded files and selected workspace context" },
+    ],
+  }),
+  starterNode("action-inspector", {
+    id: "n2",
+    title: "Inspect action",
+    x: 374,
+    y: 224,
+    status: "live",
+    purpose: "Interpret the action, expected output, work required, and specialist routing hints.",
+    instructions: "Inspect the action for intent, constraints, expected deliverable, source documents, and required domain expertise.",
+    config: [
+      { label: "Interpretation rule", value: "Derive work items and expected output from prompt or document" },
+      { label: "Output target", value: "Structured work plan for orchestrator" },
+      { label: "Work breakdown", value: "domain, task, dependencies, risk, needed evidence" },
+    ],
+  }),
+  starterNode("orchestrator", {
+    id: "n3",
+    title: "Manager orchestrator",
+    x: 708,
+    y: 224,
+    status: "ready",
+    purpose: "Delegate inspected work to the right specialist agents and manage iteration until done.",
+    instructions: "Use a manager-led strategy: assign each work item, collect outputs, loop gaps, and send completed work to evaluation.",
+    config: [
+      { label: "Delegation rule", value: "Route billing to Accounts, issue triage to Support, tax documents to Tax" },
+      { label: "Specialist roster", value: "Accounts Agent, Support Agent, Tax Agent" },
+      { label: "Success criteria", value: "All specialist outputs are complete, sourced, and review-ready" },
+      { label: "Failure path", value: "Loop unresolved gaps or escalate to human review" },
+    ],
+  }),
+  starterNode("accounts-agent", {
+    id: "n4",
+    x: 1044,
+    y: 28,
+    status: "ready",
+    purpose: "Handle invoice, receivables, payables, account record, and billing-support work items.",
+    instructions: "Return evidence-backed account output with billing risks, missing data, and handoff needs.",
+  }),
+  starterNode("support-agent", {
+    id: "n5",
+    x: 1044,
+    y: 224,
+    status: "ready",
+    purpose: "Handle internal support triage, case summary, knowledge lookup, and customer-extension drafts.",
+    instructions: "Summarize cases, identify customer-impacting gaps, and hand off account or tax questions as needed.",
+  }),
+  starterNode("tax-agent", {
+    id: "n6",
+    x: 1044,
+    y: 420,
+    status: "ready",
+    purpose: "Review tax documents, jurisdiction prompts, filing checklist needs, and escalation triggers.",
+    instructions: "Do not provide final tax advice. Return checklist output, uncertainty, evidence, and reviewer needs.",
+  }),
+  starterNode("work-loop", {
+    id: "n7",
+    title: "Loop until done",
+    x: 1392,
+    y: 224,
+    status: "ready",
+    purpose: "Loop specialist work until success criteria pass or the iteration limit is reached.",
+    instructions: "Send incomplete or contradictory outputs back to the orchestrator. Escalate after the max iteration limit.",
+    config: [
+      { label: "Max iterations", value: "3" },
+      { label: "Success criteria", value: "All specialist outputs are complete, sourced, and review-ready" },
+      { label: "Failure path", value: "Human review with unresolved gaps" },
+    ],
+  }),
+  starterNode("success-evaluator", {
+    id: "n8",
+    title: "Evaluate success",
+    x: 1696,
+    y: 112,
+    status: "ready",
+    purpose: "Decide whether the work succeeded, needs another iteration, or must be escalated.",
+    instructions: "Score output completeness, policy adherence, evidence quality, and specialist agreement.",
+    config: [
+      { label: "Eval suite", value: "Multi-agent success" },
+      { label: "Passing score", value: "0.85" },
+      { label: "Success criteria", value: "Complete output, evidence, no unresolved high-risk gaps" },
+      { label: "Failure path", value: "Return to loop or human approval" },
+    ],
+  }),
+  starterNode("approval", {
+    id: "n9",
+    title: "Human review for high risk",
+    x: 1696,
+    y: 390,
+    status: "ready",
+    purpose: "Review high-risk Tax output, failed evals, customer-facing drafts, and tool writes.",
+    instructions: "Show the proposed answer, specialist evidence, unresolved gaps, and reviewer actions.",
+    config: [
+      { label: "Approval prompt", value: "Approve, revise, or escalate this multi-agent result?" },
+      { label: "Approver role", value: "Domain reviewer" },
+      { label: "Rejected path", value: "Return to orchestrator loop" },
+    ],
+  }),
+  starterNode("audit", {
+    id: "n10",
+    title: "Decision audit trail",
+    x: 2000,
+    y: 224,
+    status: "ready",
+    purpose: "Capture decisions, approvals, data access, tool calls, and deployment evidence.",
+    instructions: "Record orchestrator decisions, specialist outputs, iterations, evals, approvals, and final outcome.",
+    config: [
+      { label: "Log destination", value: "Nexus audit log" },
+      { label: "Retention", value: "30 days for internal drafts" },
+      { label: "Evidence fields", value: "action, interpretation, assignments, iterations, approvals, output" },
+    ],
+  }),
+  starterNode("finish-handoff", {
+    id: "n11",
+    title: "Finish or escalate",
+    x: 2304,
+    y: 224,
+    status: "ready",
+    purpose: "Finish successful work or escalate with owner, trace, and unresolved gaps.",
+    instructions: "Return final work when successful. If not successful, hand off to the accountable human with evidence.",
+    config: [
+      { label: "Success output", value: "Final answer or completed internal work package" },
+      { label: "Fallback output", value: "Escalation packet with gaps and trace" },
+      { label: "Escalation owner", value: "Domain reviewer or Ops lead" },
+    ],
+  }),
+];
+
+export const initialEdges: Edge[] = [
+  { from: "n1", to: "n2", kind: "text" },
+  { from: "n2", to: "n3", kind: "json" },
+  { from: "n3", to: "n4", kind: "json" },
+  { from: "n3", to: "n5", kind: "json" },
+  { from: "n3", to: "n6", kind: "json" },
+  { from: "n4", to: "n7", kind: "json" },
+  { from: "n5", to: "n7", kind: "json" },
+  { from: "n6", to: "n7", kind: "json" },
+  { from: "n7", to: "n3", kind: "json" },
+  { from: "n7", to: "n8", kind: "json" },
+  { from: "n8", to: "n9", kind: "policy" },
+  { from: "n8", to: "n10", kind: "json" },
+  { from: "n9", to: "n3", kind: "policy" },
+  { from: "n9", to: "n10", kind: "policy" },
+  { from: "n10", to: "n11", kind: "json" },
+];
+
+export function buildAgentBlueprint({
+  nodes,
+  edges,
+  version,
+  status,
+  domainPackId = "basic-workforce",
+  deploymentTargetIds = ["internal-workspace", "team-assistant", "tool-runner"],
+}: {
+  nodes: AgentGraphNode[];
+  edges: Edge[];
+  version: number;
+  status: AgentBlueprint["status"];
+  domainPackId?: string;
+  deploymentTargetIds?: DeploymentTargetId[];
+}): AgentBlueprint {
+  const riskTier = nodes.some((node) => node.risk === "high")
+    ? "high"
+    : nodes.some((node) => node.risk === "medium")
+      ? "medium"
+      : "low";
+
+  return {
+    id: "workforce_agent_builder",
+    name: "Workforce task operations agent",
+    description: "Draft internal agent blueprint for employee task triage, governed tool actions, evals, and audit.",
+    domainPackId,
+    version,
+    status,
+    riskTier,
+    deploymentTargets: deploymentTargetIds,
+    orchestrationStrategy: "manager-led",
+    specialists: nodes
+      .map((node) => node.specialist)
+      .filter((specialist): specialist is SpecialistAgent => Boolean(specialist)),
+    nodes,
+    edges,
+    evaluations: nodes.map((node) => node.evaluation).filter((evaluation) => evaluation.required),
+  };
+}
+
+export const packIconMap = {
+  "basic-workforce": BriefcaseBusiness,
+  banking: Building2,
+} satisfies Record<string, typeof BriefcaseBusiness>;
+
+export const deploymentIconMap = {
+  "internal-workspace": BriefcaseBusiness,
+  "team-assistant": Users,
+  "tool-runner": Wrench,
+  "customer-channel": Layers3,
+} satisfies Record<DeploymentTargetId, typeof BriefcaseBusiness>;

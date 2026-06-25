@@ -31,29 +31,19 @@ import {
   Clock3,
   CopyPlus,
   Download,
-  FileSearch,
+  Focus,
   FlaskConical,
-  GitBranch,
   KeyRound,
   Layers3,
   ListChecks,
-  MessageSquare,
   MonitorPlay,
-  Play,
   Plus,
-  RefreshCw,
   Rocket,
   Save,
   Search,
-  Send,
   Settings2,
-  ShieldCheck,
-  Sigma,
   Sparkles,
   Trash2,
-  UserCheck,
-  Variable,
-  Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -70,49 +60,35 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildAgentBlueprint,
+  createDraftNode,
+  deploymentIconMap,
+  deploymentTargets,
+  domainPacks,
+  initialEdges,
+  initialNodes,
+  libraryMenus,
+  libraryNodes,
+  nodePanels,
+  packIconMap,
+  runEvents,
+  workflowTemplates,
+} from "@/lib/agents/templates";
+import type {
+  AgentGraphNode,
+  BuilderMode,
+  DeploymentTarget,
+  Edge,
+  LibraryMenu,
+  LibraryNode,
+  NodePanel,
+  NodeStatus,
+  PortKind,
+} from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 
-type PortKind = "text" | "json" | "tool" | "policy" | "memory";
-type NodeStatus = "draft" | "incomplete" | "ready" | "live" | "blocked" | "running";
-type BuilderMode = "build" | "preview" | "evaluate" | "code";
-type NodePanel = "ai" | "action" | "time" | "review";
-type LibraryMenu = "templates" | "agents" | "automations" | "logic" | "data";
-
-interface LibraryNode {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  icon: LucideIcon;
-  inputs: PortKind[];
-  outputs: PortKind[];
-  requiredConfig: string[];
-  outputSchema: string;
-  risk: "low" | "medium" | "high";
-}
-
-interface NodeConfigItem {
-  label: string;
-  value: string;
-}
-
-interface GraphNode extends LibraryNode {
-  id: string;
-  templateId: string;
-  x: number;
-  y: number;
-  status: NodeStatus;
-  panel: NodePanel;
-  purpose: string;
-  instructions: string;
-  config: NodeConfigItem[];
-}
-
-interface Edge {
-  from: string;
-  to: string;
-  kind: PortKind;
-}
+type GraphNode = AgentGraphNode;
 
 type AgentNodeData = Record<string, unknown> & {
   graph: GraphNode;
@@ -143,297 +119,6 @@ const statusTone: Record<
   running: "default",
 };
 
-const nodePanels: { id: NodePanel; label: string }[] = [
-  { id: "ai", label: "AI" },
-  { id: "action", label: "Action" },
-  { id: "time", label: "Time" },
-  { id: "review", label: "Review" },
-];
-
-const libraryMenus: { id: LibraryMenu; label: string; categories: string[] }[] = [
-  { id: "templates", label: "Templates", categories: [] },
-  { id: "agents", label: "Agents", categories: ["Core", "Safety"] },
-  { id: "automations", label: "Automation", categories: ["Tool", "Automation", "Output"] },
-  { id: "logic", label: "Logic", categories: ["Logic"] },
-  { id: "data", label: "Data", categories: ["Data"] },
-];
-
-const libraryNodes: LibraryNode[] = [
-  {
-    id: "start",
-    title: "Start",
-    category: "Core",
-    description: "Defines workflow inputs and exposes typed user input variables.",
-    icon: Play,
-    inputs: [],
-    outputs: ["text", "json"],
-    requiredConfig: ["Input variable", "State variables"],
-    outputSchema: "{ input_as_text: string, conversation_id: string }",
-    risk: "low",
-  },
-  {
-    id: "agent",
-    title: "Agent",
-    category: "Core",
-    description: "Defines instructions, model behavior, tools, and output shape.",
-    icon: Bot,
-    inputs: ["text", "json", "memory", "policy"],
-    outputs: ["json", "text"],
-    requiredConfig: ["Model", "Instructions", "Output schema"],
-    outputSchema: "{ response: string, intent: enum, confidence: number }",
-    risk: "medium",
-  },
-  {
-    id: "note",
-    title: "Note",
-    category: "Core",
-    description: "Adds team commentary without changing the workflow execution.",
-    icon: MessageSquare,
-    inputs: [],
-    outputs: [],
-    requiredConfig: ["Comment"],
-    outputSchema: "non-executable",
-    risk: "low",
-  },
-  {
-    id: "file-search",
-    title: "File search",
-    category: "Tool",
-    description: "Retrieves knowledge from indexed files or vector stores.",
-    icon: FileSearch,
-    inputs: ["text"],
-    outputs: ["json"],
-    requiredConfig: ["Vector store", "Query"],
-    outputSchema: "{ results: Array<{ title: string, excerpt: string }> }",
-    risk: "medium",
-  },
-  {
-    id: "mcp",
-    title: "MCP tool",
-    category: "Tool",
-    description: "Calls an external connector or server with scoped approvals.",
-    icon: Wrench,
-    inputs: ["json", "tool", "policy"],
-    outputs: ["json"],
-    requiredConfig: ["Server", "Tool", "Approval"],
-    outputSchema: "{ status: enum, payload: object, audit_id: string }",
-    risk: "high",
-  },
-  {
-    id: "guardrail",
-    title: "Guardrail",
-    category: "Safety",
-    description: "Checks PII, jailbreaks, hallucinations, and misuse conditions.",
-    icon: ShieldCheck,
-    inputs: ["text", "json"],
-    outputs: ["policy"],
-    requiredConfig: ["PII", "Jailbreak", "Failure path"],
-    outputSchema: "{ pass: boolean, reason: string, redactions: string[] }",
-    risk: "medium",
-  },
-  {
-    id: "if-else",
-    title: "If / else",
-    category: "Logic",
-    description: "Routes the workflow based on a structured condition.",
-    icon: GitBranch,
-    inputs: ["json", "policy"],
-    outputs: ["json"],
-    requiredConfig: ["Condition", "Else path"],
-    outputSchema: "{ branch: enum, reason: string }",
-    risk: "medium",
-  },
-  {
-    id: "while",
-    title: "While",
-    category: "Logic",
-    description: "Loops until a condition is false or a max iteration limit is reached.",
-    icon: RefreshCw,
-    inputs: ["json"],
-    outputs: ["json"],
-    requiredConfig: ["Condition", "Max iterations"],
-    outputSchema: "{ continue: boolean, iteration: number, state: object }",
-    risk: "medium",
-  },
-  {
-    id: "wait",
-    title: "Wait / schedule",
-    category: "Automation",
-    description: "Pauses, delays, or schedules the next step in an agent workflow.",
-    icon: Clock3,
-    inputs: ["json"],
-    outputs: ["json"],
-    requiredConfig: ["Delay", "Timezone", "Resume condition"],
-    outputSchema: "{ resume_at: string, timezone: string, state: object }",
-    risk: "low",
-  },
-  {
-    id: "human-approval",
-    title: "Human approval",
-    category: "Logic",
-    description: "Pauses high-impact actions until a person approves them.",
-    icon: UserCheck,
-    inputs: ["json", "text"],
-    outputs: ["policy"],
-    requiredConfig: ["Approval prompt", "Rejected path"],
-    outputSchema: "{ approved: boolean, approver_id: string, comment: string }",
-    risk: "low",
-  },
-  {
-    id: "transform",
-    title: "Transform",
-    category: "Data",
-    description: "Reshapes outputs into a stricter schema for downstream nodes.",
-    icon: Sigma,
-    inputs: ["json"],
-    outputs: ["json"],
-    requiredConfig: ["Input shape", "Output shape"],
-    outputSchema: "{ normalized: object, errors: string[] }",
-    risk: "low",
-  },
-  {
-    id: "set-state",
-    title: "Set state",
-    category: "Data",
-    description: "Stores reusable workflow variables for later steps.",
-    icon: Variable,
-    inputs: ["json", "memory"],
-    outputs: ["memory"],
-    requiredConfig: ["State key", "Retention"],
-    outputSchema: "{ key: string, value: object, expires_at: string }",
-    risk: "low",
-  },
-  {
-    id: "response",
-    title: "Response",
-    category: "Output",
-    description: "Returns a final chat answer, task update, or draft artifact.",
-    icon: Send,
-    inputs: ["text", "json", "policy"],
-    outputs: ["text"],
-    requiredConfig: ["Format", "Review policy"],
-    outputSchema: "{ message: string, next_action: string }",
-    risk: "medium",
-  },
-];
-
-const initialNodes: GraphNode[] = [
-  {
-    ...libraryNodes[0],
-    id: "n1",
-    templateId: "start",
-    title: "Conversation start",
-    x: 72,
-    y: 86,
-    status: "live",
-    panel: "ai",
-    purpose: "Accept the incoming customer message and expose the text and state variables for the workflow.",
-    instructions: "Capture the latest user message as input_as_text and preserve the conversation id for downstream steps.",
-    config: [
-      { label: "Input variable", value: "input_as_text" },
-      { label: "State variables", value: "conversation_id, project_id" },
-    ],
-  },
-  {
-    ...libraryNodes[5],
-    id: "n2",
-    templateId: "guardrail",
-    title: "Input guardrail",
-    x: 392,
-    y: 54,
-    status: "running",
-    panel: "review",
-    purpose: "Sanitize incoming text and block unsafe requests before tool or agent execution.",
-    instructions: "Detect prompt injection, redact sensitive personal data, and send failures to a safe response branch.",
-    config: [
-      { label: "PII", value: "Redact before model context" },
-      { label: "Jailbreak", value: "Block and explain" },
-      { label: "Failure path", value: "Safe response" },
-    ],
-  },
-  {
-    ...libraryNodes[1],
-    id: "n3",
-    templateId: "agent",
-    title: "Triage agent",
-    x: 392,
-    y: 256,
-    status: "ready",
-    panel: "ai",
-    purpose: "Classify the request, choose a next action, and prepare structured output for routing.",
-    instructions: "Use only sanitized inputs, classify intent, include confidence, and avoid freeform tool instructions.",
-    config: [
-      { label: "Model", value: "Ollama local" },
-      { label: "Instructions", value: "Classify and summarize" },
-      { label: "Output schema", value: "intent, confidence, summary" },
-    ],
-  },
-  {
-    ...libraryNodes[6],
-    id: "n4",
-    templateId: "if-else",
-    title: "Intent router",
-    x: 724,
-    y: 146,
-    status: "ready",
-    panel: "action",
-    purpose: "Choose the next branch after context and policy checks finish.",
-    instructions: "Route to a reply, follow-up task, escalation, or clarification based on structured intent fields.",
-    config: [
-      { label: "Condition", value: "intent in [reply, task, escalate]" },
-      { label: "Else path", value: "Ask clarifying question" },
-    ],
-  },
-  {
-    ...libraryNodes[9],
-    id: "n5",
-    templateId: "human-approval",
-    title: "Review before action",
-    x: 1056,
-    y: 90,
-    status: "draft",
-    panel: "review",
-    purpose: "Pause external writes and customer-facing sends until a human explicitly approves.",
-    instructions: "Show the proposed action, affected record, and generated copy. Continue only after approval.",
-    config: [
-      { label: "Approval prompt", value: "Approve this customer-facing action?" },
-      { label: "Rejected path", value: "Return draft to agent" },
-    ],
-  },
-  {
-    ...libraryNodes[4],
-    id: "n6",
-    templateId: "mcp",
-    title: "Create follow-up task",
-    x: 1056,
-    y: 292,
-    status: "incomplete",
-    panel: "action",
-    purpose: "",
-    instructions: "",
-    config: [
-      { label: "Server", value: "Nexus local tools" },
-      { label: "Tool", value: "Task writer" },
-      { label: "Approval", value: "" },
-    ],
-  },
-];
-
-const initialEdges: Edge[] = [
-  { from: "n1", to: "n2", kind: "text" },
-  { from: "n2", to: "n3", kind: "policy" },
-  { from: "n3", to: "n4", kind: "json" },
-  { from: "n4", to: "n5", kind: "json" },
-  { from: "n5", to: "n6", kind: "policy" },
-];
-
-const runEvents = [
-  { label: "Conversation start", state: "complete", time: "12 ms" },
-  { label: "Input guardrail", state: "running", time: "87 ms" },
-  { label: "Triage agent", state: "queued", time: "next" },
-  { label: "Review before action", state: "waiting", time: "human" },
-];
-
 const builderModes: {
   id: BuilderMode;
   label: string;
@@ -445,56 +130,11 @@ const builderModes: {
   { id: "code", label: "Code", icon: Code2 },
 ];
 
-const workflowTemplates = [
-  {
-    label: "Support triage",
-    description: "Start, guardrail, agent, approval, and task write.",
-    nodeIds: ["start", "guardrail", "agent", "if-else", "human-approval", "mcp", "response"],
-  },
-  {
-    label: "Research assistant",
-    description: "Search files, transform results, then draft a response.",
-    nodeIds: ["start", "file-search", "transform", "agent", "response"],
-  },
-  {
-    label: "Safe tool action",
-    description: "Route intent through approval before any external tool call.",
-    nodeIds: ["start", "agent", "if-else", "human-approval", "mcp"],
-  },
-];
-
 const riskTone: Record<LibraryNode["risk"], "default" | "secondary" | "destructive" | "outline"> = {
   low: "outline",
   medium: "secondary",
   high: "destructive",
 };
-
-function createDraftNode(
-  template: LibraryNode,
-  index: number,
-  position?: { x: number; y: number },
-): GraphNode {
-  return {
-    ...template,
-    id: `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    templateId: template.id,
-    title: template.title,
-    x: position?.x ?? 128 + (index % 4) * 280,
-    y: position?.y ?? 430 + Math.floor(index / 4) * 180,
-    status: "draft",
-    panel:
-      template.category === "Tool" || template.category === "Output"
-        ? "action"
-        : template.category === "Logic" || template.category === "Automation"
-          ? "time"
-          : template.category === "Safety"
-            ? "review"
-            : "ai",
-    purpose: "",
-    instructions: "",
-    config: template.requiredConfig.map((label) => ({ label, value: "" })),
-  };
-}
 
 function validateNode(node: GraphNode, edges: Edge[], nodes: GraphNode[]) {
   const issues: string[] = [];
@@ -517,13 +157,13 @@ function validateNode(node: GraphNode, edges: Edge[], nodes: GraphNode[]) {
       issues.push("Define a structured output schema for downstream nodes.");
     }
   }
-  if (node.templateId !== "start" && node.templateId !== "note" && !hasIncoming) {
+  if (!["start", "action-trigger", "note"].includes(node.templateId) && !hasIncoming) {
     issues.push("Connect this node to an upstream node before making it live.");
   }
-  if (node.templateId === "start" && hasIncoming) {
-    issues.push("Start nodes cannot have upstream connections.");
+  if (["start", "action-trigger"].includes(node.templateId) && hasIncoming) {
+    issues.push("Trigger nodes cannot have upstream connections.");
   }
-  if (node.templateId !== "response" && node.templateId !== "note" && !hasOutgoing) {
+  if (!["output", "finish-handoff", "note"].includes(node.templateId) && !hasOutgoing) {
     issues.push("Connect this node to a downstream step before making it live.");
   }
 
@@ -531,19 +171,39 @@ function validateNode(node: GraphNode, edges: Edge[], nodes: GraphNode[]) {
     if (!item.value.trim()) issues.push(`Set ${item.label}.`);
   }
 
-  if (node.templateId === "agent") {
+  if (node.templateId === "agent" || node.templateId === "orchestrator") {
     const schema = node.config.find((item) => item.label === "Output schema")?.value ?? "";
-    if (!schema.includes(",") && !schema.includes("{")) {
+    if (node.templateId === "agent" && !schema.includes(",") && !schema.includes("{")) {
       issues.push("Agent nodes need a structured output schema, not only freeform text.");
     }
   }
 
-  if (node.templateId === "mcp") {
+  if (node.templateId === "orchestrator") {
+    if (!node.delegationRule.trim()) {
+      issues.push("Orchestrators need a delegation rule.");
+    }
+    if (node.orchestrationStrategy !== "manager-led") {
+      issues.push("V1 orchestration must use the manager-led strategy.");
+    }
+  }
+
+  if (node.agentRole === "specialist") {
+    const domain = node.config.find((item) => item.label === "Domain description")?.value ?? "";
+    const input = node.config.find((item) => item.label === "Input contract")?.value ?? "";
+    const output = node.config.find((item) => item.label === "Output contract")?.value ?? "";
+    const handoff = node.config.find((item) => item.label === "Handoff rule")?.value ?? node.handoffRule;
+    if (!domain.trim()) issues.push("Specialist agents need a domain description.");
+    if (!input.trim()) issues.push("Specialist agents need an input contract.");
+    if (!output.trim()) issues.push("Specialist agents need an output contract.");
+    if (!handoff.trim()) issues.push("Specialist agents need a handoff rule.");
+  }
+
+  if (node.templateId === "tool") {
     const approval = node.config.find((item) => item.label === "Approval")?.value ?? "";
     const approvedByNode = incomingEdges.some((edge) => {
       const upstream = nodes.find((candidate) => candidate.id === edge.from);
       return (
-        upstream?.templateId === "human-approval" &&
+        upstream?.templateId === "approval" &&
         upstream.status !== "draft" &&
         upstream.status !== "incomplete"
       );
@@ -553,7 +213,7 @@ function validateNode(node: GraphNode, edges: Edge[], nodes: GraphNode[]) {
       !approval.toLowerCase().includes("on") &&
       !approvedByNode
     ) {
-      issues.push("MCP tool nodes need explicit approval or a Human approval node before writes.");
+      issues.push("Tool action nodes need explicit approval or a Human approval node before writes.");
     }
   }
 
@@ -564,10 +224,41 @@ function validateNode(node: GraphNode, edges: Edge[], nodes: GraphNode[]) {
     }
   }
 
-  if (node.templateId === "while") {
-    const maxIterations = node.config.find((item) => item.label === "Max iterations")?.value ?? "";
+  if (node.templateId === "loop" || node.templateId === "work-loop") {
+    const maxIterations =
+      node.config.find((item) => item.label === "Max iterations")?.value ??
+      String(node.iteration.maxIterations);
     if (!/\d/.test(maxIterations)) {
-      issues.push("While nodes need a numeric max iteration limit.");
+      issues.push("Iteration loop nodes need a numeric max iteration limit.");
+    }
+    const failurePath = node.config.find((item) => item.label === "Failure path")?.value ?? node.iteration.failurePath;
+    if (!failurePath.trim()) {
+      issues.push("Work loops need a failure path.");
+    }
+  }
+
+  if (node.risk === "high" && node.dataAccess.classification !== "restricted") {
+    issues.push("High-risk nodes need a restricted data access policy.");
+  }
+
+  if (node.templateId === "evaluation" || node.templateId === "success-evaluator") {
+    const passingScore = node.config.find((item) => item.label === "Passing score")?.value ?? "";
+    if (!/\d/.test(passingScore)) {
+      issues.push("Evaluation nodes need a numeric passing score.");
+    }
+  }
+
+  if (node.templateId === "finish-handoff") {
+    const successOutput = node.config.find((item) => item.label === "Success output")?.value ?? "";
+    const fallbackOutput = node.config.find((item) => item.label === "Fallback output")?.value ?? "";
+    if (!successOutput.trim()) issues.push("Finish nodes need a success output.");
+    if (!fallbackOutput.trim()) issues.push("Finish nodes need a fallback output.");
+  }
+
+  if (node.templateId === "audit") {
+    const retention = node.config.find((item) => item.label === "Retention")?.value ?? "";
+    if (!retention.trim()) {
+      issues.push("Audit nodes need a retention policy.");
     }
   }
 
@@ -616,10 +307,12 @@ function AgentBuilderFlowNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const issues = data.issues;
   const Icon = node.icon;
   const panelCopy: Record<NodePanel, string> = {
-    ai: node.templateId === "agent" ? "Generate reasoning or draft output" : "Use AI to shape this step",
-    action: node.templateId === "mcp" ? "Run an approved tool action" : "Create an automation action",
-    time: node.templateId === "while" ? "Loop with a limit" : "Schedule, wait, or delay",
-    review: node.templateId === "guardrail" ? "Check safety before continuing" : "Require review when needed",
+    ai: node.category === "Agent" ? "Reason over sanctioned work context" : "Shape this step with AI",
+    action: node.category === "Tool" ? "Run an approved enterprise action" : "Prepare automation output",
+    time: node.templateId === "loop" ? "Loop with a strict limit" : "Schedule, wait, or resume",
+    review: ["Guardrail", "Approval", "Evaluation", "Audit"].includes(node.category)
+      ? "Enforce policy, review, evals, or evidence"
+      : "Require review when needed",
   };
 
   return (
@@ -784,11 +477,22 @@ initialFlowNodes.forEach((node) => {
 });
 const initialFlowEdges = initialEdges.map(createFlowEdge);
 
+const fitViewOptions = {
+  padding: 0.18,
+  maxZoom: 0.85,
+  duration: 240,
+};
+
 export function NodeManager() {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<BuilderMode>("build");
   const [libraryMenu, setLibraryMenu] = useState<LibraryMenu>("templates");
   const [quickNodeTemplateId, setQuickNodeTemplateId] = useState("agent");
+  const [domainPackId, setDomainPackId] = useState("basic-workforce");
+  const deploymentTargetIds = useMemo(
+    () => deploymentTargets.filter((target) => target.id !== "customer-channel").map((target) => target.id),
+    [],
+  );
   const flowPaneRef = useRef<HTMLDivElement>(null);
   const [flowInstance, setFlowInstance] =
     useState<ReactFlowInstance<AgentFlowNode, AgentFlowEdge> | null>(null);
@@ -802,7 +506,7 @@ export function NodeManager() {
   const [publishedVersion, setPublishedVersion] = useState(1);
   const [lastPublishedAt, setLastPublishedAt] = useState("Draft autosaved");
   const [sampleInput, setSampleInput] = useState(
-    "Customer asks for renewal pricing and wants a follow-up task if finance approval is needed.",
+    "A prompt and invoice packet ask the system to inspect the requested action, decide whether Accounts, Support, or Tax should work on it, loop until the output is complete, then finish or escalate.",
   );
 
   const nodes = useMemo(
@@ -822,13 +526,54 @@ export function NodeManager() {
     () => new Map(nodes.map((node) => [node.id, validateNode(node, edges, nodes)])),
     [edges, nodes],
   );
-  const workflowIssues = nodes
-    .filter((node) => node.status !== "draft")
-    .flatMap((node) => nodeIssuesById.get(node.id) ?? []).length;
+  const customerDeploymentIssues = useMemo(() => {
+    const readyTemplates = new Set(
+      nodes
+        .filter((node) => node.status !== "draft" && node.status !== "incomplete")
+        .map((node) => node.templateId),
+    );
+    const missingControls = [
+      ["guardrail", "privacy guardrail"],
+      ["approval", "human approval"],
+      ["audit", "audit trail"],
+      ["evaluation", "evaluation suite"],
+    ].flatMap(([templateId, label]) => (readyTemplates.has(templateId) ? [] : [label]));
+
+    return missingControls.map((label) => `Customer-facing channel requires ${label}.`);
+  }, [nodes]);
+  const graphIssues = useMemo(() => {
+    const orchestrators = nodes.filter((node) => node.templateId === "orchestrator");
+    const finishers = nodes.filter((node) => node.templateId === "finish-handoff");
+    const specialists = nodes.filter((node) => node.agentRole === "specialist");
+
+    return [
+      ...(orchestrators.length === 1
+        ? []
+        : [`Multi-agent graphs need exactly one Orchestrator. Found ${orchestrators.length}.`]),
+      ...(finishers.length > 0 ? [] : ["Multi-agent graphs need a Finish / handoff node."]),
+      ...(specialists.length > 0 ? [] : ["Multi-agent graphs need at least one Specialist agent."]),
+    ];
+  }, [nodes]);
+  const workflowIssues =
+    nodes.flatMap((node) => nodeIssuesById.get(node.id) ?? []).length +
+    graphIssues.length;
   const draftIssues = nodes
     .filter((node) => node.status === "draft")
     .flatMap((node) => nodeIssuesById.get(node.id) ?? []).length;
   const liveNodes = nodes.filter((node) => node.status === "live").length;
+  const activePack = domainPacks.find((pack) => pack.id === domainPackId) ?? domainPacks[0];
+  const activeBlueprint = useMemo(
+    () =>
+      buildAgentBlueprint({
+        nodes,
+        edges,
+        version: publishedVersion,
+        status: workflowIssues > 0 ? "draft" : "ready",
+        domainPackId,
+        deploymentTargetIds,
+      }),
+    [deploymentTargetIds, domainPackId, edges, nodes, publishedVersion, workflowIssues],
+  );
 
   const activeLibraryMenu = libraryMenus.find((item) => item.id === libraryMenu) ?? libraryMenus[0];
   const filteredLibrary = libraryNodes.filter((node) => {
@@ -862,7 +607,7 @@ export function NodeManager() {
     [setFlowNodes],
   );
 
-  const renderedFlowNodes = useMemo(
+  const renderedFlowNodes = useMemo<AgentFlowNode[]>(
     () =>
       flowNodes.map((node) => ({
         ...node,
@@ -925,6 +670,39 @@ export function NodeManager() {
     });
   };
 
+  const updateDataAccessValue = (
+    key: keyof GraphNode["dataAccess"],
+    value: GraphNode["dataAccess"][typeof key],
+  ) => {
+    if (!selectedNode) return;
+    updateSelectedNode({
+      dataAccess: { ...selectedNode.dataAccess, [key]: value },
+    });
+  };
+
+  const updateApprovalValue = (
+    key: keyof GraphNode["approval"],
+    value: GraphNode["approval"][typeof key],
+  ) => {
+    if (!selectedNode) return;
+    updateSelectedNode({
+      approval: { ...selectedNode.approval, [key]: value },
+    });
+  };
+
+  const updateEvaluationCriteria = (value: string) => {
+    if (!selectedNode) return;
+    updateSelectedNode({
+      evaluation: {
+        ...selectedNode.evaluation,
+        criteria: value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      },
+    });
+  };
+
   const addNode = (template: LibraryNode) => {
     const draft = createDraftNode(template, nodes.length, getCanvasCenterPosition());
     setFlowNodes((current) => [
@@ -942,6 +720,7 @@ export function NodeManager() {
   };
 
   const addTemplate = (template: (typeof workflowTemplates)[number]) => {
+    setDomainPackId(template.domainPackId);
     const center = getCanvasCenterPosition();
     const baseX = center.x - 360;
     const baseY = center.y - 120;
@@ -975,6 +754,20 @@ export function NodeManager() {
     setFlowEdges((current) => [...current, ...templateEdges.map(createFlowEdge)]);
     setSelectedNodeId(templateNodes[0]?.id ?? selectedNodeId);
     setMode("build");
+  };
+
+  const addDomainPack = (packId: string) => {
+    const pack = domainPacks.find((candidate) => candidate.id === packId);
+    if (!pack) return;
+    setDomainPackId(pack.id);
+    const packTemplate = {
+      label: pack.label,
+      description: pack.description,
+      domainPackId: pack.id,
+      icon: packIconMap[pack.id as keyof typeof packIconMap] ?? Layers3,
+      nodeIds: pack.defaultNodeIds,
+    };
+    addTemplate(packTemplate);
   };
 
   const keepDraft = () => {
@@ -1054,19 +847,23 @@ export function NodeManager() {
     [nodesById, setFlowEdges],
   );
 
+  const fitGraph = useCallback(() => {
+    flowInstance?.fitView(fitViewOptions);
+  }, [flowInstance]);
+
   return (
-    <div className="grid h-full min-w-0 grid-cols-[280px_minmax(0,1fr)_320px] overflow-hidden bg-shell">
-      <aside className="flex min-w-0 flex-col border-r border-border bg-pane">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[280px_minmax(0,1fr)_320px] overflow-hidden bg-shell">
+      <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-pane">
         <div className="border-b border-border px-4 py-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Agent graph
+            Agent blueprint
           </p>
           <div className="mt-1 flex items-center justify-between gap-3">
-            <h2 className="truncate text-base font-semibold">Node library</h2>
+            <h2 className="truncate text-base font-semibold">Builder catalog</h2>
             <Button
               size="icon-sm"
               variant="outline"
-              title="Create instruction node"
+              title="Create work intake node"
               onClick={() => addNode(libraryNodes[0])}
             >
               <Plus />
@@ -1077,11 +874,11 @@ export function NodeManager() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search nodes"
+              placeholder="Search agent blocks"
               className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
             />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+          <div className="mt-3 grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
             {libraryMenus.map((item) => (
               <button
                 key={item.id}
@@ -1103,7 +900,7 @@ export function NodeManager() {
             {(libraryMenu === "templates" || query.trim().length > 0) && (
             <section className="flex flex-col gap-1">
               <p className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Templates
+                Process templates
               </p>
               {workflowTemplates.map((template) => (
                 <button
@@ -1112,9 +909,14 @@ export function NodeManager() {
                   onClick={() => addTemplate(template)}
                   className="group flex w-full items-start gap-3 rounded-md border border-border bg-background px-3 py-3 text-left transition-colors hover:bg-muted"
                 >
+                  {(() => {
+                    const Icon = template.icon;
+                    return (
                   <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground group-hover:text-foreground">
-                    <Layers3 />
+                        <Icon />
                   </span>
+                    );
+                  })()}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{template.label}</span>
                     <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -1126,7 +928,63 @@ export function NodeManager() {
             </section>
             )}
 
-            {["Core", "Tool", "Automation", "Safety", "Logic", "Data", "Output"].map((category) => {
+            {(libraryMenu === "packs" || query.trim().length > 0) && (
+              <section className="flex flex-col gap-1">
+                <p className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Domain packs
+                </p>
+                {domainPacks.map((pack) => {
+                  const Icon = packIconMap[pack.id as keyof typeof packIconMap];
+
+                  return (
+                    <button
+                      key={pack.id}
+                      type="button"
+                      onClick={() => addDomainPack(pack.id)}
+                      className={cn(
+                        "group flex w-full items-start gap-3 rounded-md border px-3 py-3 text-left transition-colors hover:bg-muted",
+                        pack.id === domainPackId
+                          ? "border-active bg-active-soft"
+                          : "border-border bg-background",
+                      )}
+                    >
+                      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground group-hover:text-foreground">
+                        <Icon />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="block truncate text-sm font-medium">{pack.label}</span>
+                          <Badge variant={riskTone[pack.riskTier]} className="h-5 px-1.5 text-[10px]">
+                            {pack.riskTier}
+                          </Badge>
+                        </span>
+                        <span className="mt-1 block line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {pack.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+            )}
+
+            {[
+              "Input",
+              "Agent",
+              "Specialist",
+              "Orchestration",
+              "Knowledge",
+              "Tool",
+              "Logic",
+              "Automation",
+              "Guardrail",
+              "Approval",
+              "Evaluation",
+              "Audit",
+              "Data",
+              "Memory",
+              "Output",
+            ].map((category) => {
               const categoryNodes = filteredLibrary.filter((node) => node.category === category);
               if (categoryNodes.length === 0) return null;
 
@@ -1182,12 +1040,12 @@ export function NodeManager() {
         </ScrollArea>
       </aside>
 
-      <section className="flex min-w-0 flex-col overflow-hidden">
+      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex min-h-14 items-center justify-between gap-3 border-b border-border bg-pane px-5 py-2">
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold">Customer reply agent</h1>
+            <h1 className="truncate text-base font-semibold">Workforce agent builder</h1>
             <p className="truncate text-xs text-muted-foreground">
-              v{publishedVersion} - {nodes.length} nodes - {liveNodes} live - {workflowIssues} blocking issue
+              {activePack.label} - v{publishedVersion} - {nodes.length} nodes - {liveNodes} live - {workflowIssues} blocking issue
               {workflowIssues === 1 ? "" : "s"} - {draftIssues} draft issue
               {draftIssues === 1 ? "" : "s"}
             </p>
@@ -1224,7 +1082,7 @@ export function NodeManager() {
         </div>
 
         {mode === "build" && (
-          <div ref={flowPaneRef} className="relative min-h-0 min-w-0 flex-1 bg-shell">
+          <div ref={flowPaneRef} className="relative h-full min-h-0 min-w-0 flex-1 bg-shell">
             <ReactFlowProvider>
               <ReactFlow
                 nodes={renderedFlowNodes}
@@ -1238,8 +1096,16 @@ export function NodeManager() {
                   const nextSelected = selectedNodes[0]?.id;
                   if (nextSelected) setSelectedNodeId(nextSelected);
                 }}
-                onInit={setFlowInstance}
+                onInit={(instance) => {
+                  setFlowInstance(instance);
+                  window.requestAnimationFrame(() => {
+                    instance.fitView(fitViewOptions);
+                  });
+                }}
                 fitView
+                fitViewOptions={fitViewOptions}
+                minZoom={0.25}
+                maxZoom={1.1}
                 connectionRadius={32}
                 defaultEdgeOptions={{ type: "smoothstep" }}
                 className="bg-[radial-gradient(circle_at_1px_1px,var(--border)_1px,transparent_0)] bg-[length:24px_24px]"
@@ -1263,9 +1129,13 @@ export function NodeManager() {
 
             <div className="pointer-events-none absolute left-5 top-5 flex items-center gap-2 rounded-md border border-border bg-pane px-3 py-2 text-xs text-muted-foreground shadow-sm">
               <Sparkles />
-              Drag, resize, and connect handles. Draft nodes may stay incomplete.
+              Draft agents stay safe until blueprint checks pass.
             </div>
             <div className="absolute right-5 top-5 flex items-center gap-2 rounded-md border border-border bg-pane p-2 shadow-sm">
+              <Button variant="outline" size="sm" onClick={fitGraph}>
+                <Focus data-icon="inline-start" />
+                Fit graph
+              </Button>
               <Select
                 value={quickNodeTemplateId}
                 onValueChange={(value) => {
@@ -1324,11 +1194,11 @@ export function NodeManager() {
                   <div>
                     <p className="text-sm font-semibold">Preview run</p>
                     <p className="text-xs text-muted-foreground">
-                      Test with live-like input and inspect each node event before publishing.
+                      Test with employee-style input and inspect policy, approval, and audit events.
                     </p>
                   </div>
                   <Button size="sm" disabled={workflowIssues > 0}>
-                    <Play data-icon="inline-start" />
+                    <MonitorPlay data-icon="inline-start" />
                     Run preview
                   </Button>
                 </div>
@@ -1363,7 +1233,7 @@ export function NodeManager() {
             </div>
             <aside className="border-l border-border bg-pane p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Data contract
+                Blueprint contract
               </p>
               <div className="mt-3 flex flex-col gap-3">
                 {nodes.slice(0, 6).map((node) => (
@@ -1375,6 +1245,34 @@ export function NodeManager() {
                   </div>
                 ))}
               </div>
+              <Separator className="my-4" />
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Deployment targets
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                {deploymentTargets.map((target) => {
+                  const Icon = deploymentIconMap[target.id];
+                  const locked =
+                    target.id === "customer-channel" && customerDeploymentIssues.length > 0;
+
+                  return (
+                    <div key={target.id} className="rounded-md border border-border p-3">
+                      <div className="flex items-center gap-2">
+                        <Icon className="text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {target.label}
+                        </span>
+                        <Badge variant={locked ? "destructive" : "secondary"}>
+                          {locked ? "locked" : "ready"}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {target.description}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </aside>
           </div>
         )}
@@ -1382,9 +1280,9 @@ export function NodeManager() {
         {mode === "evaluate" && (
           <div className="grid min-h-0 flex-1 grid-cols-3 gap-4 overflow-auto bg-shell p-5">
             {[
-              ["Safety grader", "Checks prompt injection, PII redaction, and tool-call approval."],
-              ["Task success", "Scores whether the workflow selected the expected branch and response."],
-              ["Trace review", "Annotates decisions, guardrail failures, and external calls."],
+              ["Workforce baseline", "Scores task success, grounded answers, and follow-up accuracy."],
+              ["Governance gate", "Checks approvals, restricted data boundaries, and tool-call review."],
+              ["Customer readiness", "Locks customer deployment until privacy, audit, and eval checks pass."],
             ].map(([title, body]) => (
               <section key={title} className="rounded-md border border-border bg-pane p-4">
                 <ClipboardCheck className="text-active" />
@@ -1406,7 +1304,7 @@ export function NodeManager() {
                 <div>
                   <p className="text-sm font-semibold">Deployment snapshot</p>
                   <p className="text-xs text-muted-foreground">
-                    Export a stable workflow contract for ChatKit-style embedding or an SDK runner.
+                    Export the shared AgentBlueprint contract used by canvas and chat-created drafts.
                   </p>
                 </div>
                 <Button size="sm" variant="outline">
@@ -1416,19 +1314,7 @@ export function NodeManager() {
               </div>
               <pre className="overflow-auto p-4 text-xs leading-5 text-muted-foreground">
 {JSON.stringify(
-  {
-    id: "customer_reply_agent",
-    version: publishedVersion,
-    provider: "ollama",
-    nodes: nodes.map(({ id, templateId, title, status, outputSchema }) => ({
-      id,
-      type: templateId,
-      title,
-      status,
-      outputSchema,
-    })),
-    edges,
-  },
+  activeBlueprint,
   null,
   2,
 )}
@@ -1438,7 +1324,7 @@ export function NodeManager() {
         )}
       </section>
 
-      <aside className="flex min-w-0 flex-col border-l border-border bg-pane">
+      <aside className="flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-pane">
         {selectedNode ? (
           <>
             <div className="border-b border-border px-4 py-4">
@@ -1493,11 +1379,28 @@ export function NodeManager() {
                   </>
                 )}
 
+                {graphIssues.length > 0 && (
+                  <>
+                    <Separator />
+                    <section className="flex flex-col gap-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Blueprint blockers
+                      </p>
+                      {graphIssues.map((issue) => (
+                        <div key={issue} className="flex items-start gap-2 text-sm">
+                          <AlertTriangle className="mt-0.5 text-destructive" />
+                          <span className="leading-5 text-muted-foreground">{issue}</span>
+                        </div>
+                      ))}
+                    </section>
+                  </>
+                )}
+
                 <Separator />
 
                 <section className="flex flex-col gap-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Definition
+                    Identity and purpose
                   </p>
                   <label className="flex flex-col gap-1.5 text-sm">
                     Name
@@ -1543,6 +1446,89 @@ export function NodeManager() {
 
                 <section className="flex flex-col gap-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Orchestration
+                  </p>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Agent role
+                    <Select
+                      value={selectedNode.agentRole}
+                      onValueChange={(value) =>
+                        updateSelectedNode({
+                          agentRole: value as GraphNode["agentRole"],
+                          orchestrationStrategy:
+                            value === "orchestrator" ? "manager-led" : selectedNode.orchestrationStrategy,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Agent role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {["orchestrator", "inspector", "specialist", "reviewer", "finisher"].map(
+                            (role) => (
+                              <SelectItem key={role} value={role}>
+                                {role}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Delegation rule
+                    <Textarea
+                      value={selectedNode.delegationRule}
+                      onChange={(event) =>
+                        updateSelectedNode({ delegationRule: event.target.value })
+                      }
+                      rows={3}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Max iterations
+                    <Input
+                      value={String(selectedNode.iteration.maxIterations)}
+                      onChange={(event) =>
+                        updateSelectedNode({
+                          iteration: {
+                            ...selectedNode.iteration,
+                            maxIterations: Number(event.target.value) || 0,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Success criteria
+                    <Textarea
+                      value={selectedNode.iteration.successCriteria}
+                      onChange={(event) =>
+                        updateSelectedNode({
+                          iteration: {
+                            ...selectedNode.iteration,
+                            successCriteria: event.target.value,
+                          },
+                        })
+                      }
+                      rows={3}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Handoff / escalation rule
+                    <Textarea
+                      value={selectedNode.handoffRule}
+                      onChange={(event) => updateSelectedNode({ handoffRule: event.target.value })}
+                      rows={3}
+                    />
+                  </label>
+                </section>
+
+                <Separator />
+
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Required configuration
                   </p>
                   {selectedNode.config.map((item) => (
@@ -1555,6 +1541,162 @@ export function NodeManager() {
                       />
                     </label>
                   ))}
+                </section>
+
+                <Separator />
+
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Knowledge and data access
+                  </p>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Classification
+                    <Select
+                      value={selectedNode.dataAccess.classification}
+                      onValueChange={(value) =>
+                        updateDataAccessValue(
+                          "classification",
+                          value as GraphNode["dataAccess"]["classification"],
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Classification" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {["public", "internal", "confidential", "restricted"].map((level) => (
+                            <SelectItem key={level} value={level}>
+                              {level}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Sources
+                    <Input
+                      value={selectedNode.dataAccess.sources}
+                      onChange={(event) => updateDataAccessValue("sources", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Retention
+                    <Input
+                      value={selectedNode.dataAccess.retention}
+                      onChange={(event) => updateDataAccessValue("retention", event.target.value)}
+                    />
+                  </label>
+                </section>
+
+                <Separator />
+
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Approval policy
+                  </p>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Mode
+                    <Select
+                      value={selectedNode.approval.mode}
+                      onValueChange={(value) =>
+                        updateApprovalValue(
+                          "mode",
+                          value as GraphNode["approval"]["mode"],
+                        )
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Approval mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {["none", "human-review", "manager-review", "compliance-review"].map(
+                            (modeOption) => (
+                              <SelectItem key={modeOption} value={modeOption}>
+                                {modeOption}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Approver
+                    <Input
+                      value={selectedNode.approval.approver}
+                      onChange={(event) => updateApprovalValue("approver", event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Required for
+                    <Input
+                      value={selectedNode.approval.requiredFor}
+                      onChange={(event) => updateApprovalValue("requiredFor", event.target.value)}
+                    />
+                  </label>
+                </section>
+
+                <Separator />
+
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Evals and audit
+                  </p>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Evaluation suite
+                    <Input
+                      value={selectedNode.evaluation.suite}
+                      onChange={(event) =>
+                        updateSelectedNode({
+                          evaluation: {
+                            ...selectedNode.evaluation,
+                            suite: event.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    Criteria
+                    <Textarea
+                      value={selectedNode.evaluation.criteria.join(", ")}
+                      onChange={(event) => updateEvaluationCriteria(event.target.value)}
+                      rows={3}
+                    />
+                  </label>
+                </section>
+
+                <Separator />
+
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Deployment target
+                  </p>
+                  {deploymentTargets.map((target: DeploymentTarget) => {
+                    const Icon = deploymentIconMap[target.id];
+                    const locked =
+                      target.id === "customer-channel" && customerDeploymentIssues.length > 0;
+
+                    return (
+                      <div key={target.id} className="rounded-md border border-border p-3">
+                        <div className="flex items-center gap-2">
+                          <Icon className="text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {target.label}
+                          </span>
+                          <Badge variant={locked ? "destructive" : "outline"}>
+                            {locked ? "locked" : "available"}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {target.requiredControls.join(", ")}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </section>
 
                 <Separator />

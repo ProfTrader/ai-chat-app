@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { createUIMessageStreamResponse } from "ai";
 import {
   resolveCursorApiKey,
   resolveMoonshotBaseUrl,
@@ -103,7 +102,8 @@ chat.post("/", async (c) => {
           context,
         });
 
-    return createUIMessageStreamResponse({ stream });
+    const { createUIMessageStreamResponse } = await import("ai");
+    return createUIMessageStreamResponse({ stream: await stream });
   } catch (error) {
     console.error("Chat stream error:", error);
     return c.json(
