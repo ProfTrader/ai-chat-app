@@ -1,6 +1,6 @@
 export interface AuthStatus {
   connected: boolean;
-  provider: "cursor" | "openai" | null;
+  provider: "cursor" | "openai" | "moonshot" | "ollama" | null;
   method: "api_key" | "browser" | null;
   email: string | null;
   model: string;
@@ -38,7 +38,7 @@ export async function startCursorAuth(): Promise<{
 }
 
 export async function connectCursorApiKey(apiKey: string, model?: string) {
-  const response = await fetch("/api/auth/cursor/api-key", {
+  const response = await fetch("/api/auth/moonshot/api-key", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -48,13 +48,13 @@ export async function connectCursorApiKey(apiKey: string, model?: string) {
 }
 
 export async function fetchCursorModels(): Promise<CursorModel[]> {
-  const response = await fetch("/api/auth/cursor/models", { credentials: "include" });
+  const response = await fetch("/api/auth/moonshot/models", { credentials: "include" });
   const data = await parseJson<{ models: CursorModel[] }>(response);
   return data.models;
 }
 
 export async function updateCursorModel(model: string) {
-  const response = await fetch("/api/auth/cursor/model", {
+  const response = await fetch("/api/auth/moonshot/model", {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

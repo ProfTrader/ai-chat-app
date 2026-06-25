@@ -8,10 +8,14 @@ import {
   getAuthStatus,
   getSessionIdFromCookie,
   resolveCursorApiKey,
+  resolveMoonshotBaseUrl,
+  resolveMoonshotApiKey,
+  resolveMoonshotModel,
   setSessionCookie,
   updateSession,
 } from "../lib/auth.js";
 import { listCursorModels, validateCursorApiKey } from "../lib/cursor.js";
+import { listMoonshotModels } from "../lib/moonshot.js";
 
 const auth = new Hono();
 
@@ -96,6 +100,43 @@ auth.post("/cursor/api-key", async (c) => {
   }
 });
 
+auth.post("/moonshot/api-key", async (c) => {
+  const body = z
+    .object({
+      apiKey: z.string().min(10),
+      model: z.string().optional(),
+    })
+    .parse(await c.req.json());
+
+  try {
+    await listMoonshotModels(body.apiKey, resolveMoonshotBaseUrl());
+    const session = await createSession({
+      provider: "moonshot",
+      method: "api_key",
+      moonshotApiKey: body.apiKey,
+      email: "Moonshot API key",
+      model: resolveMoonshotModel(body.model),
+    });
+
+    setSessionCookie(c, session.id);
+    return c.json({
+      connected: true,
+      provider: "moonshot",
+      method: "api_key",
+      email: session.email,
+      model: session.model,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        code: "INVALID_API_KEY",
+        message: error instanceof Error ? error.message : "Invalid Moonshot API key",
+      },
+      401,
+    );
+  }
+});
+
 auth.get("/cursor/models", async (c) => {
   const status = await getAuthStatus(c);
   if (!status.connected) {
@@ -117,6 +158,47 @@ auth.get("/cursor/models", async (c) => {
       models: [{ id: status.model ?? "composer-2.5", name: status.model ?? "composer-2.5" }],
     });
   }
+});
+
+auth.get("/moonshot/models", async (c) => {
+  const apiKey = await resolveMoonshotApiKey(c);
+  if (!apiKey) {
+    return c.json({ code: "AUTH_REQUIRED", message: "Add a Moonshot API key first." }, 401);
+  }
+
+  try {
+    const models = await listMoonshotModels(apiKey, resolveMoonshotBaseUrl());
+    const mapped = models
+      .map((model) => ({ id: model.id, name: model.display_name ?? model.id }))
+      .filter((model) => model.id.startsWith("kimi") || model.id.startsWith("moonshot"));
+
+    return c.json({
+      models:
+        mapped.length > 0
+          ? mapped
+          : [{ id: resolveMoonshotModel(), name: resolveMoonshotModel() }],
+    });
+  } catch {
+    return c.json({
+      models: [{ id: resolveMoonshotModel(), name: resolveMoonshotModel() }],
+    });
+  }
+});
+
+auth.patch("/moonshot/model", async (c) => {
+  const sessionId = getSessionIdFromCookie(c);
+  const body = z.object({ model: z.string().min(1) }).parse(await c.req.json());
+
+  if (!sessionId) {
+    return c.json({ model: resolveMoonshotModel(body.model) });
+  }
+
+  const session = await updateSession(sessionId, { model: body.model });
+  if (!session) {
+    return c.json({ code: "AUTH_REQUIRED" }, 401);
+  }
+
+  return c.json({ model: session.model });
 });
 
 auth.patch("/cursor/model", async (c) => {

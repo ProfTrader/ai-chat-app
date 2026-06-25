@@ -78,7 +78,7 @@ export interface UserProfile {
   status: PresenceStatus;
 }
 
-export type ViewType = "chat" | "tasks" | "contacts" | "board";
+export type ViewType = "chat" | "tasks" | "contacts" | "board" | "nodes";
 
 export interface ContextChip {
   id: string;

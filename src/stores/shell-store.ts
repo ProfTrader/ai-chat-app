@@ -4,14 +4,14 @@ import type { ViewType } from "@/types";
 
 export type SidebarMode = "inbox" | "projects";
 
-const NAV_PANEL_DEFAULT = 26;
+const NAV_PANEL_DEFAULT = 33;
 const INSPECTOR_PANEL_DEFAULT = 30;
 const NAV_PANEL_MIN = 18;
 const INSPECTOR_PANEL_MIN = 20;
 
 function normalizeNavPanelSize(size: unknown): number {
   if (typeof size !== "number" || Number.isNaN(size)) return NAV_PANEL_DEFAULT;
-  return Math.min(35, Math.max(NAV_PANEL_MIN, size));
+  return Math.min(40, Math.max(NAV_PANEL_MIN, size));
 }
 
 function normalizeInspectorPanelSize(size: unknown): number {

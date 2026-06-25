@@ -1,9 +1,12 @@
-import "dotenv/config";
+import { config } from "dotenv";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "./routes/auth.js";
 import { chat } from "./routes/chat.js";
+
+config();
+config({ path: "server/.env", override: false });
 
 const app = new Hono();
 

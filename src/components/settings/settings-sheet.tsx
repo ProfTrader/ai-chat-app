@@ -32,13 +32,13 @@ export function SettingsSheet() {
         <SheetHeader>
           <SheetTitle>Settings</SheetTitle>
           <SheetDescription>
-            Connect Cursor, choose a model, and manage your assistant account.
+            Connect Moonshot/Kimi, choose a model, and manage your assistant account.
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex flex-col gap-6 px-4 pb-6">
           <section className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium">Account</h3>
+            <h3 className="text-sm font-medium">Chat provider</h3>
             <CursorAuthPanel />
           </section>
 

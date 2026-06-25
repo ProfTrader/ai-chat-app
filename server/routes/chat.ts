@@ -1,15 +1,58 @@
 import { Hono } from "hono";
 import { createUIMessageStreamResponse } from "ai";
-import { resolveCursorApiKey } from "../lib/auth.js";
+import {
+  resolveCursorApiKey,
+  resolveMoonshotBaseUrl,
+  resolveMoonshotApiKey,
+  resolveMoonshotModel,
+  validateMoonshotApiKey,
+} from "../lib/auth.js";
 import { chatContextSchema, extractLatestUserMessage } from "../lib/context.js";
 import { createCursorChatStream } from "../lib/cursor.js";
+import { createMoonshotChatStream } from "../lib/moonshot.js";
+import {
+  createOllamaChatStream,
+  resolveOllamaBaseUrl,
+  resolveOllamaModel,
+  validateOllamaModel,
+} from "../lib/ollama.js";
 
 const chat = new Hono();
 
 chat.post("/", async (c) => {
-  const apiKey = await resolveCursorApiKey(c);
-  if (!apiKey) {
-    return c.json({ code: "AUTH_REQUIRED", message: "Connect Cursor to start chatting." }, 401);
+  const useOllama = Boolean(process.env.OLLAMA_MODEL);
+  const moonshotApiKey = await resolveMoonshotApiKey(c);
+  const cursorApiKey = await resolveCursorApiKey(c);
+
+  if (useOllama && !(await validateOllamaModel(resolveOllamaModel()))) {
+    return c.json(
+      {
+        code: "OLLAMA_MODEL_NOT_FOUND",
+        message: `Ollama model ${resolveOllamaModel()} is not available locally.`,
+      },
+      401,
+    );
+  }
+
+  if (!useOllama && !moonshotApiKey && !cursorApiKey) {
+    return c.json(
+      {
+        code: "AUTH_REQUIRED",
+        message:
+          "Set MOONSHOT_API_KEY or KIMI_API_KEY on the server to start chatting.",
+      },
+      401,
+    );
+  }
+
+  if (!useOllama && moonshotApiKey && !(await validateMoonshotApiKey(moonshotApiKey))) {
+    return c.json(
+      {
+        code: "INVALID_API_KEY",
+        message: "Moonshot/Kimi rejected the configured API key.",
+      },
+      401,
+    );
   }
 
   const body = await c.req.json();
@@ -31,18 +74,34 @@ chat.post("/", async (c) => {
     tasksSummary: body.tasksSummary,
   });
 
-  const model =
-    body.model ??
-    process.env.CURSOR_MODEL ??
-    "composer-2.5";
+  const model = useOllama
+    ? resolveOllamaModel(body.model)
+    : moonshotApiKey
+    ? resolveMoonshotModel(body.model)
+    : body.model ?? process.env.CURSOR_MODEL ?? "composer-2.5";
 
   try {
-    const stream = createCursorChatStream({
-      apiKey,
-      model,
-      userMessage,
-      context,
-    });
+    const stream = useOllama
+      ? createOllamaChatStream({
+          baseUrl: resolveOllamaBaseUrl(),
+          model,
+          userMessage,
+          context,
+        })
+      : moonshotApiKey
+        ? createMoonshotChatStream({
+          apiKey: moonshotApiKey,
+          baseUrl: resolveMoonshotBaseUrl(),
+          model,
+          userMessage,
+          context,
+        })
+        : createCursorChatStream({
+          apiKey: cursorApiKey!,
+          model,
+          userMessage,
+          context,
+        });
 
     return createUIMessageStreamResponse({ stream });
   } catch (error) {

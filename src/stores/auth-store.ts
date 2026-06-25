@@ -69,7 +69,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       set({
         connecting: false,
-        error: error instanceof Error ? error.message : "Invalid API key",
+        error: error instanceof Error ? error.message : "Invalid Moonshot API key",
       });
       throw error;
     }

@@ -83,7 +83,7 @@ export function ChatComposer() {
         <div className="rounded-xl border border-border bg-composer">
           {!connected && (
             <div className="border-b border-border px-3.5 py-2 text-xs text-muted-foreground">
-              Sign in with Cursor to start chatting.{" "}
+              Add a Moonshot/Kimi key or configure Ollama on the server to start chatting.{" "}
               <button
                 type="button"
                 className="underline underline-offset-4"
@@ -99,7 +99,7 @@ export function ChatComposer() {
             onChange={(e) => setComposerText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              connected ? "What should we tackle?" : "Connect Cursor to enable chat"
+              connected ? "What should we tackle?" : "Configure a chat provider to enable chat"
             }
             rows={1}
             disabled={disabled || isStreaming}

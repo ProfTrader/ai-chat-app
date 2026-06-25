@@ -40,7 +40,7 @@ export function ChatThread() {
           </EmptyHeader>
           {!connected && (
             <EmptyContent>
-              <Button onClick={() => setSettingsOpen(true)}>Sign in with Cursor</Button>
+              <Button onClick={() => setSettingsOpen(true)}>Open model settings</Button>
             </EmptyContent>
           )}
         </Empty>

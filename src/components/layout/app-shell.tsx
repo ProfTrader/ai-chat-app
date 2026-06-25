@@ -1,8 +1,5 @@
 import { useEffect, useMemo } from "react";
 import { usePanelRef } from "react-resizable-panels";
-import { TitleBar } from "@/components/layout/icon-rail";
-import { StatusBar } from "@/components/layout/status-bar";
-import { TrialBanner } from "@/components/layout/trial-banner";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
 import { MainWorkspace } from "@/components/workspace/main-workspace";
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
@@ -19,6 +16,7 @@ import { useShellStore } from "@/stores/shell-store";
 
 export function AppShell() {
   const {
+    activeView,
     navCollapsed,
     inspectorCollapsed,
     navPanelSize,
@@ -33,10 +31,13 @@ export function AppShell() {
   const defaultLayout = useMemo(
     () => ({
       nav: navCollapsed ? 0 : navPanelSize,
-      workspace: 100 - (navCollapsed ? 0 : navPanelSize) - (inspectorCollapsed ? 0 : inspectorPanelSize),
-      inspector: inspectorCollapsed ? 0 : inspectorPanelSize,
+      workspace:
+        100 -
+        (navCollapsed ? 0 : navPanelSize) -
+        (inspectorCollapsed || activeView === "nodes" ? 0 : inspectorPanelSize),
+      inspector: inspectorCollapsed || activeView === "nodes" ? 0 : inspectorPanelSize,
     }),
-    [navCollapsed, inspectorCollapsed, navPanelSize, inspectorPanelSize],
+    [activeView, navCollapsed, inspectorCollapsed, navPanelSize, inspectorPanelSize],
   );
 
   useEffect(() => {
@@ -55,8 +56,6 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-shell">
-      <TrialBanner />
-      <TitleBar />
       <ResizablePanelGroup
         id="app-shell"
         orientation="horizontal"
@@ -98,28 +97,31 @@ export function AppShell() {
           </section>
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
+        {activeView !== "nodes" && (
+          <>
+            <ResizableHandle withHandle />
 
-        <ResizablePanel
-          id="inspector"
-          panelRef={inspectorPanelRef}
-          collapsible
-          collapsedSize="0%"
-          defaultSize={`${inspectorPanelSize}%`}
-          minSize="20%"
-          maxSize="40%"
-          className="min-h-0 min-w-0"
-        >
-          <section
-            aria-label="Inspector"
-            aria-hidden={inspectorCollapsed}
-            className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-pane"
-          >
-            <InspectorPanel />
-          </section>
-        </ResizablePanel>
+            <ResizablePanel
+              id="inspector"
+              panelRef={inspectorPanelRef}
+              collapsible
+              collapsedSize="0%"
+              defaultSize={`${inspectorPanelSize}%`}
+              minSize="20%"
+              maxSize="40%"
+              className="min-h-0 min-w-0"
+            >
+              <section
+                aria-label="Inspector"
+                aria-hidden={inspectorCollapsed}
+                className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-pane"
+              >
+                <InspectorPanel />
+              </section>
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
-      <StatusBar />
       <CommandPalette />
       <ShortcutsDialog />
       <SettingsSheet />

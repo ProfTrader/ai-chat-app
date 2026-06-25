@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nexus Layout Concept</title>
+    <style>
+      :root {
+        --ink: #1e1f24;
+        --muted: #70737c;
+        --faint: #9ea2ab;
+        --line: #e7e8eb;
+        --line-strong: #d7d9df;
+        --shell: #f6f6f4;
+        --pane: #ffffff;
+        --soft: #f0f1f3;
+        --active: #3157d5;
+        --active-soft: #eaf0ff;
+        --amber: #b56a13;
+        --amber-soft: #fff4e4;
+        --teal: #177b72;
+        --teal-soft: #e7f5f2;
+        --danger: #cf3c4f;
+        --shadow: 0 1px 2px rgba(20, 23, 31, 0.06), 0 14px 40px rgba(20, 23, 31, 0.05);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: var(--shell);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 244px 336px minmax(520px, 1fr) 314px;
+        height: 100vh;
+        min-height: 720px;
+        overflow: hidden;
+      }
+
+      .rail,
+      .queue,
+      .context {
+        min-width: 0;
+        background: var(--pane);
+        border-right: 1px solid var(--line);
+      }
+
+      .rail {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 56px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        font-weight: 650;
+      }
+
+      .mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--ink);
+        color: white;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .workspace-switch {
+        margin-left: auto;
+        color: var(--muted);
+      }
+
+      .trial {
+        padding: 18px 16px;
+        background: #f1f1ef;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .trial p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .primary-action,
+      .send-action {
+        border: 0;
+        border-radius: 999px;
+        background: var(--ink);
+        color: white;
+        cursor: pointer;
+        font-weight: 650;
+      }
+
+      .primary-action {
+        height: 34px;
+        padding: 0 16px;
+      }
+
+      .nav {
+        min-height: 0;
+        overflow: auto;
+        padding: 16px 12px;
+      }
+
+      .nav-section {
+        margin: 18px 0 6px;
+        padding: 0 8px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+        text-transform: uppercase;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 34px;
+        padding: 0 8px;
+        border-radius: 7px;
+        color: #555963;
+        font-size: 14px;
+      }
+
+      .nav-item strong {
+        color: var(--ink);
+        font-weight: 650;
+      }
+
+      .nav-item.active {
+        background: var(--soft);
+        color: var(--ink);
+      }
+
+      .nav-count {
+        margin-left: auto;
+        display: grid;
+        min-width: 19px;
+        height: 19px;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--danger);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .migration {
+        margin-top: auto;
+        padding: 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .migration h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+
+      .migration p {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .queue {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .queue-search {
+        display: flex;
+        align-items: center;
+        height: 56px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+        color: var(--faint);
+      }
+
+      .queue-search input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+      }
+
+      .queue-tabs {
+        display: flex;
+        gap: 6px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .queue-tabs button {
+        height: 30px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        padding: 0 10px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .queue-tabs button.active {
+        border-color: var(--line-strong);
+        background: var(--pane);
+        color: var(--ink);
+      }
+
+      .people {
+        overflow: auto;
+      }
+
+      .person {
+        display: grid;
+        grid-template-columns: 38px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        min-height: 74px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .person.active {
+        background: #f1f1ef;
+      }
+
+      .avatar {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .avatar.blue {
+        background: var(--active-soft);
+        color: var(--active);
+      }
+
+      .avatar.green {
+        background: var(--teal-soft);
+        color: var(--teal);
+      }
+
+      .avatar.amber {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .person h3,
+      .person p {
+        margin: 0;
+      }
+
+      .person h3 {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .person p {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .person .state {
+        align-self: start;
+        color: var(--faint);
+        font-size: 12px;
+      }
+
+      .workspace {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        background: var(--shell);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 56px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--pane);
+      }
+
+      .topbar h1 {
+        min-width: 0;
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 18px;
+        font-weight: 680;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
+        border-radius: 999px;
+        padding: 0 9px;
+        background: var(--active-soft);
+        color: var(--active);
+        font-size: 12px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .topbar-spacer {
+        flex: 1;
+      }
+
+      .ghost-action {
+        height: 34px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: var(--pane);
+        color: var(--ink);
+        cursor: pointer;
+        padding: 0 13px;
+        font-weight: 620;
+      }
+
+      .send-action {
+        height: 34px;
+        padding: 0 16px;
+      }
+
+      .draft-area {
+        min-height: 0;
+        overflow: auto;
+        padding: 64px clamp(28px, 7vw, 92px);
+      }
+
+      .composer-card {
+        max-width: 820px;
+        margin: 0 auto;
+        border: 1px solid var(--line-strong);
+        background: var(--pane);
+        box-shadow: var(--shadow);
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: 54px 1fr auto;
+        align-items: center;
+        min-height: 54px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+        column-gap: 8px;
+      }
+
+      .field-label {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 640;
+      }
+
+      .identity {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .dot {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--active);
+        color: white;
+        font-size: 11px;
+        font-weight: 750;
+      }
+
+      .identity strong {
+        color: var(--ink);
+      }
+
+      .cc {
+        display: flex;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 620;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        border-radius: 999px;
+        background: var(--soft);
+        padding: 0 10px;
+        color: #555963;
+        font-size: 13px;
+      }
+
+      .subject {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        font-size: 14px;
+        font-weight: 680;
+      }
+
+      .body {
+        min-height: 390px;
+        padding: 22px 18px 12px;
+        font-size: 15px;
+        line-height: 1.48;
+      }
+
+      .body p {
+        max-width: 680px;
+        margin: 0 0 18px;
+      }
+
+      .ai-note {
+        margin-bottom: 22px;
+        border-left: 3px solid var(--amber);
+        padding: 9px 12px;
+        background: var(--amber-soft);
+        color: #674111;
+        font-size: 13px;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 18px 18px;
+        color: var(--muted);
+      }
+
+      .tool {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .tool:hover {
+        background: var(--soft);
+      }
+
+      .wait-step {
+        display: grid;
+        place-items: center;
+        gap: 6px;
+        margin: 24px 0;
+        color: var(--muted);
+      }
+
+      .wait-step span {
+        display: inline-flex;
+        height: 34px;
+        align-items: center;
+        border-radius: 999px;
+        background: #dedfdf;
+        padding: 0 18px;
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .context {
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid var(--line);
+      }
+
+      .context-header {
+        min-height: 56px;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 16px;
+      }
+
+      .context-header h2 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .context-header p {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .context-body {
+        overflow: auto;
+        padding: 16px;
+      }
+
+      .context-section {
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .context-section:first-child {
+        padding-top: 0;
+      }
+
+      .context-section h3 {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 720;
+        text-transform: uppercase;
+      }
+
+      .metric {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 30px;
+        font-size: 13px;
+      }
+
+      .metric span {
+        color: var(--muted);
+      }
+
+      .brief {
+        margin: 0;
+        color: #383b43;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 32px;
+        color: #4b4f58;
+        font-size: 13px;
+      }
+
+      .check::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        background: var(--teal);
+      }
+
+      .activity {
+        display: grid;
+        gap: 10px;
+      }
+
+      .activity-item {
+        display: grid;
+        gap: 2px;
+        font-size: 13px;
+      }
+
+      .activity-item span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1180px) {
+        .app {
+          grid-template-columns: 76px 300px minmax(440px, 1fr);
+        }
+
+        .rail {
+          align-items: stretch;
+        }
+
+        .brand span:not(.mark),
+        .workspace-switch,
+        .trial,
+        .nav-section,
+        .nav-item span:not(.nav-count),
+        .migration,
+        .context {
+          display: none;
+        }
+
+        .nav-item {
+          justify-content: center;
+          padding: 0;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .app {
+          grid-template-columns: 1fr;
+          min-height: 100vh;
+        }
+
+        .rail,
+        .queue,
+        .context {
+          display: none;
+        }
+
+        .topbar {
+          flex-wrap: wrap;
+          height: auto;
+          min-height: 56px;
+          padding: 10px 14px;
+        }
+
+        .draft-area {
+          padding: 18px 14px 48px;
+        }
+
+        .composer-card {
+          max-width: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app" aria-label="Nexus layout concept">
+      <aside class="rail" aria-label="Navigation">
+        <div class="brand">
+          <span class="mark">NX</span>
+          <span>Nexus</span>
+          <span class="workspace-switch">⌄</span>
+        </div>
+        <div class="trial">
+          <p>AI workspace trial · 6 days left</p>
+          <button class="primary-action">Upgrade</button>
+        </div>
+        <nav class="nav">
+          <div class="nav-item active"><span>⌕</span><span><strong>Inbox</strong></span></div>
+          <div class="nav-item"><span>◌</span><span>Signals</span><span class="nav-count">3</span></div>
+          <div class="nav-item"><span>□</span><span>Drafts</span></div>
+          <div class="nav-item"><span>▥</span><span>Automations</span></div>
+          <div class="nav-item"><span>⚙</span><span>Settings</span></div>
+
+          <div class="nav-section">Shared views</div>
+          <div class="nav-item"><span>▤</span><span>Priority accounts</span></div>
+          <div class="nav-item"><span>▤</span><span>Renewal watch</span></div>
+          <div class="nav-item"><span>▤</span><span>AI handoff queue</span></div>
+          <div class="nav-item"><span>＋</span><span>New view</span></div>
+
+          <div class="nav-section">Private</div>
+          <div class="nav-item"><span>▢</span><span>Founder follow-ups</span></div>
+          <div class="nav-item"><span>▢</span><span>Product feedback</span></div>
+        </nav>
+        <div class="migration">
+          <h3>Import customer data</h3>
+          <p>Bring contacts, companies, and prior conversations into the workspace.</p>
+          <button class="primary-action">Start import</button>
+        </div>
+      </aside>
+
+      <section class="queue" aria-label="Conversation queue">
+        <div class="queue-search">
+          <input aria-label="Search conversations" placeholder="Search conversations" />
+        </div>
+        <div class="queue-tabs" aria-label="Queue filters">
+          <button class="active">Open</button>
+          <button>Waiting</button>
+          <button>Review</button>
+        </div>
+        <div class="people">
+          <article class="person">
+            <div class="avatar amber">AC</div>
+            <div>
+              <h3>Acme Cloud</h3>
+              <p>Pricing question · 8m</p>
+            </div>
+            <span class="state">AI</span>
+          </article>
+          <article class="person">
+            <div class="avatar">GH</div>
+            <div>
+              <h3>Greenhouse</h3>
+              <p>Trial handoff · 21m</p>
+            </div>
+            <span class="state">New</span>
+          </article>
+          <article class="person active">
+            <div class="avatar blue">MT</div>
+            <div>
+              <h3>Meta</h3>
+              <p>Enterprise outreach · Draft ready</p>
+            </div>
+            <span class="state">Review</span>
+          </article>
+          <article class="person">
+            <div class="avatar green">NV</div>
+            <div>
+              <h3>NVIDIA</h3>
+              <p>Product feedback · 1h</p>
+            </div>
+            <span class="state">Open</span>
+          </article>
+          <article class="person">
+            <div class="avatar">SF</div>
+            <div>
+              <h3>Stripe</h3>
+              <p>Security review · 2h</p>
+            </div>
+            <span class="state">SLA</span>
+          </article>
+          <article class="person">
+            <div class="avatar amber">SQ</div>
+            <div>
+              <h3>Sequoia</h3>
+              <p>Warm intro · Tomorrow</p>
+            </div>
+            <span class="state">Wait</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Draft workspace">
+        <header class="topbar">
+          <h1>Let’s Connect: Nexus x Meta</h1>
+          <span class="chip">In review</span>
+          <div class="topbar-spacer"></div>
+          <span class="state">Saved</span>
+          <button class="ghost-action">Edit draft</button>
+          <button class="send-action">Send</button>
+        </header>
+
+        <div class="draft-area">
+          <article class="composer-card">
+            <div class="field-row">
+              <div class="field-label">From</div>
+              <div class="identity"><span class="dot">S</span><strong>Sam Lee</strong> sam@nexus.ai</div>
+              <div></div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">To</div>
+              <div class="identity"><span class="avatar blue">MT</span><strong>Meta</strong> contact@meta.com</div>
+              <div class="cc"><span>Cc</span><span>Bcc</span></div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">Cc</div>
+              <div class="pill">founders@nexus.ai ×</div>
+              <div></div>
+            </div>
+            <div class="subject">Let’s Connect: Nexus x Meta</div>
+            <div class="body">
+              <div class="ai-note">AI draft based on the account profile, prior product signals, and the outreach goal. Review before sending.</div>
+              <p>Dear Meta team,</p>
+              <p>I’m Sam from Nexus, where we help teams turn customer conversations into clear next steps, reviewed drafts, and visible account context.</p>
+              <p>I noticed your team’s focus on high-quality customer engagement, and I think there may be a useful conversation around how AI can support thoughtful, accountable follow-up without adding more workflow overhead.</p>
+              <p>Would you be open to a short call next week? I can share a few examples of how Nexus keeps the human decision in the loop while speeding up the repetitive parts of customer communication.</p>
+              <p>Best,<br />Sam</p>
+            </div>
+            <div class="toolbar" aria-label="Composer tools">
+              <span class="tool">B</span>
+              <span class="tool">I</span>
+              <span class="tool">U</span>
+              <span class="tool">“</span>
+              <span class="tool">≡</span>
+              <span class="tool">↗</span>
+              <span class="tool">□</span>
+            </div>
+          </article>
+
+          <div class="wait-step">
+            <span>Wait 1 day</span>
+            <div>↓</div>
+          </div>
+
+          <article class="composer-card" aria-label="Follow-up preview">
+            <div class="field-row">
+              <div class="field-label">From</div>
+              <div class="identity"><span class="dot">S</span><strong>Sam Lee</strong> sam@nexus.ai</div>
+              <div></div>
+            </div>
+            <div class="field-row">
+              <div class="field-label">To</div>
+              <div class="identity"><span class="avatar blue">MT</span><strong>Meta</strong> contact@meta.com</div>
+              <div class="cc"><span>Cc</span><span>Bcc</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="context" aria-label="Context panel">
+        <div class="context-header">
+          <h2>Meta</h2>
+          <p>Enterprise account · Owned by Sam Lee</p>
+        </div>
+        <div class="context-body">
+          <section class="context-section">
+            <h3>Account</h3>
+            <div class="metric"><span>Stage</span><strong>Outbound review</strong></div>
+            <div class="metric"><span>Fit</span><strong>High</strong></div>
+            <div class="metric"><span>Last touch</span><strong>2 days ago</strong></div>
+          </section>
+
+          <section class="context-section">
+            <h3>AI brief</h3>
+            <p class="brief">Mention accountable AI, human review, and reduced context switching. Keep tone direct and product-led.</p>
+          </section>
+
+          <section class="context-section">
+            <h3>Before send</h3>
+            <div class="check">Personalization reviewed</div>
+            <div class="check">No unsupported claims</div>
+            <div class="check">Next step is specific</div>
+          </section>
+
+          <section class="context-section">
+            <h3>Recent activity</h3>
+            <div class="activity">
+              <div class="activity-item"><strong>Draft generated</strong><span>4 minutes ago</span></div>
+              <div class="activity-item"><strong>Account enriched</strong><span>Today at 11:12</span></div>
+              <div class="activity-item"><strong>Signal added</strong><span>Yesterday</span></div>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </main>
+  </body>
+</html>
