@@ -18,7 +18,8 @@ const shortcuts = [
   { keys: "Ctrl + 7", action: "Go to Nodes" },
   { keys: "Ctrl + B", action: "Toggle navigation sidebar" },
   { keys: "Ctrl + I", action: "Toggle inspector panel" },
-  { keys: "?", action: "Show keyboard shortcuts" },
+  { keys: "Ctrl + /", action: "Show keyboard shortcuts" },
+  { keys: "?", action: "Show keyboard shortcuts when not typing" },
 ];
 
 export function ShortcutsDialog() {

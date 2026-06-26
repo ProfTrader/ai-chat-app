@@ -994,7 +994,7 @@ export function BriefsWorkspace() {
     actionProposals,
     teamMembers,
     datasets,
-    createWorkRunFromPrompt,
+    createArtifactRunFromPromptStream,
     addSampleDataset,
     importCsvDataset,
     updateDatasetColumnRole,
@@ -1037,7 +1037,7 @@ export function BriefsWorkspace() {
   );
 
   const createRun = async (prompt: string) => {
-    await createWorkRunFromPrompt(prompt, projectId ?? undefined);
+    await createArtifactRunFromPromptStream(prompt, projectId ?? undefined);
   };
 
   if (!selectedRun || !draft) {

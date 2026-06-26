@@ -25,7 +25,6 @@ import {
   createAgentActionProposal,
   createNextDraft,
   createRoadmapItemsFromRun,
-  createResearchBriefRun,
   nextLoopPhase,
   updateRunPhase,
 } from "@/lib/artifacts/brief-loop";
@@ -35,8 +34,10 @@ import {
   runBusinessIntelligenceAgent,
 } from "@/lib/agents/runtime";
 import {
-  applyLocalModelPolish,
-  polishBriefWithLocalModel,
+  applyLocalModelBrief,
+  generateBriefWithLocalModel,
+  streamBriefWithLocalModel,
+  type ArtifactStreamEvent,
 } from "@/lib/agents/client";
 import {
   mockContacts,
@@ -50,6 +51,7 @@ import {
 import { enrichContacts, enrichTeamMember } from "@/lib/person-profiles";
 
 interface DataState {
+  artifactSchemaVersion: number;
   initialized: boolean;
   workspaces: Workspace[];
   projects: Project[];
@@ -76,6 +78,7 @@ interface DataState {
     role?: Message["role"],
     id?: string,
   ) => Promise<Message>;
+  updateMessageContent: (id: string, content: string) => Promise<void>;
   addSession: (projectId: string, title?: string) => Promise<Session>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   addProject: (name: string, workspaceId: string) => Promise<Project>;
@@ -92,6 +95,16 @@ interface DataState {
     semanticRole?: DatasetSemanticRole,
   ) => void;
   createWorkRunFromPrompt: (prompt: string, projectId?: string) => Promise<WorkRun>;
+  createArtifactRunFromPromptStream: (
+    prompt: string,
+    projectId?: string,
+    onEvent?: (event: ArtifactStreamEvent) => void,
+  ) => Promise<WorkRun>;
+  commitArtifactRun: (payload: {
+    workRun: WorkRun;
+    agentRun: AgentRun;
+    memoryNotes: AgentMemoryNote[];
+  }) => WorkRun;
   selectWorkRun: (id: string | null) => void;
   setWorkRunPhase: (id: string, phase: WorkLoopPhase) => void;
   advanceWorkRun: (id: string) => void;
@@ -151,21 +164,6 @@ function hasDatasetShape(dataset: ProjectDataset) {
   return Boolean(dataset.id && Array.isArray(dataset.columns) && Array.isArray(dataset.rows));
 }
 
-const seedWorkRuns = [
-  createResearchBriefRun({
-    prompt: "Create a Q2 launch research brief from workspace signals",
-    ...buildRunContext("proj-1", {
-      projects: mockProjects,
-      tasks: mockTasks,
-      contacts: mockContacts,
-      sessions: mockSessions,
-      messages: mockMessages,
-    }),
-    phase: "audit",
-    approved: true,
-  }),
-];
-
 function seedTaskActivities(): TaskActivity[] {
   return mockTasks.slice(0, 5).map((task, index) => ({
     id: generateId("activity"),
@@ -183,12 +181,11 @@ function seedTaskActivities(): TaskActivity[] {
 }
 
 const seedTaskActivityItems = seedTaskActivities();
-const seedRoadmapItems: RoadmapItem[] = createRoadmapItemsFromRun(seedWorkRuns[0]).map((item) => ({
-  ...item,
-  owner: "Sam",
-}));
+const seedRoadmapItems: RoadmapItem[] = [];
+const ARTIFACT_SCHEMA_VERSION = 2;
 
 export const useDataStore = create<DataState>((set, get) => ({
+  artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
   initialized: false,
   workspaces: mockWorkspaces,
   projects: mockProjects,
@@ -200,11 +197,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   datasets: [],
   agentRuns: [],
   agentMemoryNotes: [],
-  workRuns: seedWorkRuns,
+  workRuns: [],
   actionProposals: [],
   taskActivities: seedTaskActivityItems,
   roadmapItems: seedRoadmapItems,
-  selectedWorkRunId: seedWorkRuns[0]?.id ?? null,
+  selectedWorkRunId: null,
 
   initialize: async () => {
     if (get().initialized) return;
@@ -233,11 +230,13 @@ export const useDataStore = create<DataState>((set, get) => ({
     if (stored) {
       try {
         const data = JSON.parse(stored) as Partial<DataState>;
+        const resetArtifacts = data.artifactSchemaVersion !== ARTIFACT_SCHEMA_VERSION;
         const storedRuns =
-          Array.isArray(data.workRuns) && data.workRuns.every(hasCurrentRunShape)
+          !resetArtifacts && Array.isArray(data.workRuns) && data.workRuns.every(hasCurrentRunShape)
             ? data.workRuns
-            : seedWorkRuns;
+            : [];
         set({
+          artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
           workspaces: data.workspaces ?? mockWorkspaces,
           projects: data.projects ?? mockProjects,
           tasks: data.tasks ?? mockTasks,
@@ -249,17 +248,18 @@ export const useDataStore = create<DataState>((set, get) => ({
             Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
               ? data.datasets
               : [],
-          agentRuns: Array.isArray(data.agentRuns) ? data.agentRuns : [],
-          agentMemoryNotes: Array.isArray(data.agentMemoryNotes) ? data.agentMemoryNotes : [],
+          agentRuns: !resetArtifacts && Array.isArray(data.agentRuns) ? data.agentRuns : [],
+          agentMemoryNotes: !resetArtifacts && Array.isArray(data.agentMemoryNotes) ? data.agentMemoryNotes : [],
           workRuns: storedRuns,
-          actionProposals: data.actionProposals ?? [],
+          actionProposals: !resetArtifacts ? data.actionProposals ?? [] : [],
           taskActivities: data.taskActivities ?? seedTaskActivityItems,
-          roadmapItems: data.roadmapItems ?? seedRoadmapItems,
+          roadmapItems: !resetArtifacts ? data.roadmapItems ?? seedRoadmapItems : seedRoadmapItems,
           selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
             ? data.selectedWorkRunId!
             : storedRuns[0]?.id ?? null,
           initialized: true,
         });
+        persistLocal(get());
         return;
       } catch {
         // fall through
@@ -367,6 +367,14 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
 
     return message;
+  },
+
+  updateMessageContent: async (id, content) => {
+    const messages = get().messages.map((message) =>
+      message.id === id ? { ...message, content } : message,
+    );
+    set({ messages });
+    persistLocal(get());
   },
 
   addSession: async (projectId, title = "New session") => {
@@ -477,33 +485,67 @@ export const useDataStore = create<DataState>((set, get) => ({
     });
     persistLocal(get());
 
-    void polishBriefWithLocalModel({ workRun, agentRun })
-      .then((polish) => {
-        if (!polish.used) return;
+    void generateBriefWithLocalModel({ workRun, agentRun })
+      .then((brief) => {
+        if (!brief.used) return;
         const current = get();
         const currentWorkRun = current.workRuns.find((run) => run.id === workRun.id);
         const currentAgentRun = current.agentRuns.find((run) => run.id === agentRun.id);
         if (!currentWorkRun || !currentAgentRun) return;
-        const polished = applyLocalModelPolish({
+        const generated = applyLocalModelBrief({
           workRun: currentWorkRun,
           agentRun: currentAgentRun,
-          polish,
+          brief,
         });
         set({
           workRuns: current.workRuns.map((run) =>
-            run.id === workRun.id ? polished.workRun : run,
+            run.id === workRun.id ? generated.workRun : run,
           ),
           agentRuns: current.agentRuns.map((run) =>
-            run.id === agentRun.id ? polished.agentRun : run,
+            run.id === agentRun.id ? generated.agentRun : run,
           ),
         });
         persistLocal(get());
       })
       .catch((error) => {
-        console.warn("Local model polish skipped:", error);
+        console.warn("Local model brief generation skipped:", error);
       });
 
     return workRun;
+  },
+
+  commitArtifactRun: ({ workRun, agentRun, memoryNotes }) => {
+    const current = get();
+    set({
+      workRuns: [workRun, ...current.workRuns.filter((run) => run.id !== workRun.id)],
+      agentRuns: [agentRun, ...current.agentRuns.filter((run) => run.id !== agentRun.id)],
+      agentMemoryNotes: [
+        ...memoryNotes,
+        ...current.agentMemoryNotes.filter((note) => note.runId !== agentRun.id),
+      ],
+      selectedWorkRunId: workRun.id,
+    });
+    persistLocal(get());
+    return workRun;
+  },
+
+  createArtifactRunFromPromptStream: async (prompt, projectId, onEvent) => {
+    const state = get();
+    const targetProjectId = projectId ?? state.projects[0]?.id ?? "proj-1";
+    const context = buildRunContext(targetProjectId, state);
+    const { workRun, agentRun, memoryNotes } = runBusinessIntelligenceAgent({
+      prompt,
+      ...context,
+      datasets: state.datasets.filter((dataset) => dataset.projectId === targetProjectId),
+    });
+
+    const brief = await streamBriefWithLocalModel({ workRun, agentRun, onEvent });
+    const generated = applyLocalModelBrief({ workRun, agentRun, brief });
+    return get().commitArtifactRun({
+      workRun: generated.workRun,
+      agentRun: generated.agentRun,
+      memoryNotes,
+    });
   },
 
   selectWorkRun: (selectedWorkRunId) => {
@@ -702,6 +744,7 @@ export const useDataStore = create<DataState>((set, get) => ({
 
 function persistLocal(state: DataState) {
   const payload = {
+    artifactSchemaVersion: state.artifactSchemaVersion,
     workspaces: state.workspaces,
     projects: state.projects,
     tasks: state.tasks,

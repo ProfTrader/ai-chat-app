@@ -31,6 +31,55 @@ function uiMessageToText(message: UIMessage) {
     .join("\n");
 }
 
+function messageContent(message: Message) {
+  return message.content.toLowerCase();
+}
+
+function hasRecentBriefContext(messages: Message[]) {
+  return messages
+    .slice(-8)
+    .some((message) =>
+      /\b(brief|breif|research memo|memo|report|dossier|artifact|study|research findings)\b/.test(
+        messageContent(message),
+      ),
+    );
+}
+
+function shouldRouteToBrief(text: string, previousMessages: Message[]) {
+  const input = text.toLowerCase().replace(/\s+/g, " ").trim();
+  const artifactIntent = /\b(brief|breif|research memo|memo|report|dossier|artifact|study|research findings)\b/.test(input);
+  const createIntent = /\b(build|create|draft|make|generate|write|prepare|produce|turn|convert|give|compose|do)\b/.test(input) || /\bput together\b/.test(input);
+  const analysisBriefIntent = /\b(analysis|analyze|research)\b/.test(input) && /\b(next|plan|recommend|what to do|summary)\b/.test(input);
+  const bareBriefIntent = artifactIntent && /\b(general|overall|status|research|findings|next|it|that|this)\b/.test(input);
+  const continuationIntent =
+    hasRecentBriefContext(previousMessages) &&
+    /\b(brief|breif|research|findings|general|overall|status|next|it|that|this|give me|do it|go ahead)\b/.test(input) &&
+    !/^(what|why|when|where|who|how)\b/.test(input);
+
+  return (artifactIntent && (createIntent || analysisBriefIntent || bareBriefIntent)) || continuationIntent;
+}
+
+function buildBriefPrompt(text: string, previousMessages: Message[], projectName?: string) {
+  const recentUserContext = previousMessages
+    .slice(-8)
+    .filter((message) => message.role === "user")
+    .slice(-4)
+    .map((message) => `- ${message.content}`)
+    .join("\n\n");
+
+  if (!recentUserContext) return text;
+
+  return `Create a structured brief for ${projectName ?? "the selected project"} using the latest request and recent user intent.
+
+Latest request:
+${text}
+
+Recent user intent:
+${recentUserContext}
+
+Do not ask clarifying questions. Use available workspace evidence, cite what is known, and mark missing information as evidence gaps or assumptions.`;
+}
+
 interface ChatSessionContextValue {
   messages: UIMessage[];
   status: ReturnType<typeof useChat>["status"];
@@ -81,8 +130,9 @@ export function ChatSessionProvider({
 }) {
   const getMessagesBySession = useDataStore((s) => s.getMessagesBySession);
   const persistChatMessage = useDataStore((s) => s.persistChatMessage);
+  const updateMessageContent = useDataStore((s) => s.updateMessageContent);
   const updateSessionTitle = useDataStore((s) => s.updateSessionTitle);
-  const createWorkRunFromPrompt = useDataStore((s) => s.createWorkRunFromPrompt);
+  const createArtifactRunFromPromptStream = useDataStore((s) => s.createArtifactRunFromPromptStream);
   const { projects, workspaces, getTasksByProject } = useDataStore();
   const { projectId, contextChips } = useSelectionStore();
   const { composerMode } = useChatStore();
@@ -188,15 +238,68 @@ export function ChatSessionProvider({
     }
 
     setActivities([]);
+    const previousMessages = getMessagesBySession(sessionId);
     await persistChatMessage(sessionId, text, "user");
-    if (composerMode === "plan") {
-      await createWorkRunFromPrompt(text, projectId ?? undefined);
-      toast.success("Plan artifact created in Briefs.");
-    }
+    const shouldCreateBrief = composerMode === "plan" || shouldRouteToBrief(text, previousMessages);
 
     const sessionMessages = getMessagesBySession(sessionId);
     if (sessionMessages.filter((m) => m.role === "user").length === 1) {
       void updateSessionTitle(sessionId, text);
+    }
+
+    if (shouldCreateBrief) {
+      const assistant = await persistChatMessage(
+        sessionId,
+        "Dexter is creating the HTML brief artifact...\n\n- Understanding request",
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+
+      const progress: string[] = [];
+      const renderProgress = (line: string) => {
+        if (!progress.includes(line)) progress.push(line);
+        const body = [
+          "Dexter is creating the HTML brief artifact...",
+          "",
+          ...progress.map((item) => `- ${item}`),
+        ].join("\n");
+        void updateMessageContent(assistant.id, body).then(() => {
+          chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+        });
+      };
+
+      try {
+        const run = await createArtifactRunFromPromptStream(
+          buildBriefPrompt(text, previousMessages, project?.name),
+          projectId ?? undefined,
+          (event) => {
+            if (event.data.label) {
+              renderProgress(event.data.detail ? `${event.data.label}: ${event.data.detail}` : event.data.label);
+            }
+          },
+        );
+
+        await updateMessageContent(
+          assistant.id,
+          [
+            `Created **${run.title}**.`,
+            "",
+            "The HTML artifact is ready in Briefs with evidence, tables, charts, recommendations, and audit status.",
+            "",
+            `[[nexus:view-brief:${run.id}]]`,
+          ].join("\n"),
+        );
+        chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+        toast.success("Brief artifact created.");
+      } catch (error) {
+        await updateMessageContent(
+          assistant.id,
+          `I could not create the brief artifact. ${error instanceof Error ? error.message : "The stream failed."}`,
+        );
+        chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+        toast.error("Brief creation failed.");
+      }
+      return;
     }
 
     await chat.sendMessage({ text });

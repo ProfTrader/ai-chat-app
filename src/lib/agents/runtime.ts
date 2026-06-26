@@ -204,6 +204,15 @@ function titleCase(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function displayPrompt(prompt: string) {
+  const latest = prompt.match(/Latest request:\s*([\s\S]*?)(?:\n\s*Recent user intent:|\n\s*Conversation context:|$)/i)?.[1];
+  const cleaned = (latest ?? prompt)
+    .replace(/\s+/g, " ")
+    .replace(/^[-:]+/, "")
+    .trim();
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+}
+
 function round(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -404,6 +413,7 @@ export function createSampleDataset(projectId: string, domainId: AgentDomainId):
 
 function createWorkspaceDataset(projectId: string, tasks: Task[]): ProjectDataset {
   const rows = tasks.map((task) => ({
+    identifier: task.identifier,
     created_at: task.createdAt,
     task: task.title,
     status: task.status,
@@ -422,6 +432,44 @@ function createWorkspaceDataset(projectId: string, tasks: Task[]): ProjectDatase
     rows,
     createdAt: timestamp,
     updatedAt: timestamp,
+  };
+}
+
+function workspaceTaskRows(dataset: ProjectDataset) {
+  if (dataset.domainId !== "general" || dataset.sourceKind !== "workspace") return [];
+  return dataset.rows.map((row) => ({
+    identifier: stringValue(row.identifier),
+    title: stringValue(row.task),
+    status: stringValue(row.status),
+    priority: stringValue(row.priority),
+    owner: stringValue(row.owner),
+    effort: numberValue(row.effort),
+  }));
+}
+
+function formatTaskReference(task: ReturnType<typeof workspaceTaskRows>[number]) {
+  const owner = task.owner && task.owner !== "Unassigned" ? `, owner ${task.owner}` : "";
+  return `${task.identifier} [${task.status}, ${task.priority}${owner}] ${task.title}`;
+}
+
+function workspaceTaskSummary(dataset: ProjectDataset) {
+  const tasks = workspaceTaskRows(dataset);
+  if (tasks.length === 0) return null;
+  const openTasks = tasks.filter((task) => task.status !== "done");
+  const inProgress = tasks.filter((task) => task.status === "in_progress");
+  const todo = tasks.filter((task) => task.status === "todo");
+  const highPriority = tasks.filter((task) => task.priority === "high");
+  const researchTasks = tasks.filter((task) => /(research|brief|evidence|finding|insight)/i.test(task.title));
+
+  return {
+    tasks,
+    openTasks,
+    inProgress,
+    todo,
+    highPriority,
+    researchTasks,
+    statusLine: `${tasks.length} total tasks, ${openTasks.length} open, ${inProgress.length} in progress, ${todo.length} todo, ${highPriority.length} high priority.`,
+    focusLine: openTasks.slice(0, 5).map(formatTaskReference).join("; "),
   };
 }
 
@@ -577,21 +625,20 @@ function buildEvidence(result: ToolResult, confidence: number): EvidenceSource {
   };
 }
 
-function classifyDomain(prompt: string, datasets: ProjectDataset[]): AgentDomainId {
+function classifyDomain(prompt: string): AgentDomainId {
   const input = prompt.toLowerCase();
   if (/(prop|trader|funded|evaluation|payout|breach|p&l|pnl)/.test(input)) return "prop_firm";
   if (/(commerce|order|shop|product|discount|coupon|sales|margin|refund)/.test(input)) return "commerce";
   if (/(social|linkedin|twitter|x |post|ceo|brand|engagement|impressions)/.test(input)) return "social";
-  return datasets.find((dataset) => dataset.domainId !== "general")?.domainId ?? "general";
+  return "general";
 }
 
 function pickDataset(domainId: AgentDomainId, datasets: ProjectDataset[], tasks: Task[], projectId: string) {
-  return (
-    datasets.find((dataset) => dataset.domainId === domainId) ??
-    datasets.find((dataset) => dataset.domainId !== "general") ??
-    datasets[0] ??
-    createWorkspaceDataset(projectId, tasks)
-  );
+  if (domainId === "general") {
+    return datasets.find((dataset) => dataset.domainId === "general") ?? createWorkspaceDataset(projectId, tasks);
+  }
+
+  return datasets.find((dataset) => dataset.domainId === domainId) ?? createWorkspaceDataset(projectId, tasks);
 }
 
 function buildMetrics(profile: ProfileResult, dataset: ProjectDataset): MetricDefinition[] {
@@ -625,6 +672,56 @@ function buildInsights({
   effectiveness: ReturnType<typeof effectivenessAnalysis>;
   evidence: EvidenceSource[];
 }): Insight[] {
+  const taskSummary = workspaceTaskSummary(dataset);
+  if (domainId === "general" && taskSummary) {
+    const blockers = taskSummary.inProgress.length > 0 ? taskSummary.inProgress : taskSummary.openTasks.slice(0, 2);
+    const nextQueue = taskSummary.todo.slice(0, 4);
+    const researchTasks = taskSummary.researchTasks.length > 0 ? taskSummary.researchTasks : taskSummary.openTasks;
+
+    return [
+      {
+        id: "claim-workspace-task-health",
+        claim: `Workspace task evidence shows ${taskSummary.statusLine}`,
+        evidenceIds: [evidence[0]?.id].filter(Boolean),
+        confidence: 0.9,
+        recommendedAction: "Use this task health read as the operating baseline for the next Q2 launch brief.",
+      },
+      {
+        id: "claim-workspace-immediate-focus",
+        claim:
+          blockers.length > 0
+            ? `Immediate focus should stay on ${blockers.map(formatTaskReference).join("; ")}.`
+            : "No active blocker is marked in progress, so the next brief should promote the highest-priority todo work.",
+        evidenceIds: [evidence[2]?.id].filter(Boolean),
+        confidence: blockers.length > 0 ? 0.86 : 0.62,
+        recommendedAction: "Confirm owners, blockers, and next check-in dates for the active work before adding new scope.",
+        assumption: blockers.length === 0,
+      },
+      {
+        id: "claim-workspace-research-findings",
+        claim:
+          researchTasks.length > 0
+            ? `Research and findings work is represented by ${researchTasks.map(formatTaskReference).join("; ")}.`
+            : "Research and findings are not explicitly represented in the current task list.",
+        evidenceIds: [evidence[1]?.id].filter(Boolean),
+        confidence: researchTasks.length > 0 ? 0.84 : 0.45,
+        recommendedAction: "Turn the research/finding work into a concise evidence checklist before stakeholder follow-up.",
+        assumption: researchTasks.length === 0,
+      },
+      {
+        id: "claim-workspace-next-queue",
+        claim:
+          nextQueue.length > 0
+            ? `Next queue after active work: ${nextQueue.map(formatTaskReference).join("; ")}.`
+            : "The next queue is not defined beyond the active work already in progress.",
+        evidenceIds: [evidence[3]?.id].filter(Boolean),
+        confidence: nextQueue.length > 0 ? 0.8 : 0.45,
+        recommendedAction: "Sequence the todo queue into owner-backed tasks and use the board to track movement daily.",
+        assumption: nextQueue.length === 0,
+      },
+    ];
+  }
+
   const topSegment = segments[0];
   const latestTrend = trend[trend.length - 1];
   const primaryMetric = profile.numericTotals[0];
@@ -824,6 +921,7 @@ function buildStructuredSections({
   evidence: EvidenceSource[];
   visualizations: VisualizationBlock[];
 }): ArtifactSection[] {
+  const question = displayPrompt(prompt);
   const kpiBlock = visualizations.find((block) => block.kind === "kpi");
   const segmentChart = visualizations.find((block) => block.kind === "bar");
   const trendChart = visualizations.find((block) => block.kind === "line");
@@ -863,7 +961,7 @@ function buildStructuredSections({
           type: "hero",
           eyebrow: domainLabels[domainId],
           title: `${domainLabels[domainId]} brief: ${dataset.name}`,
-          subtitle: `A structured in-app research artifact answering: ${prompt}`,
+          subtitle: `A structured in-app research artifact answering: ${question}`,
           meta: [
             { label: "Generated", value: date },
             { label: "Dataset", value: dataset.name },
@@ -890,7 +988,7 @@ function buildStructuredSections({
           id: id("artifact-block"),
           type: "summary",
           title: "Question answered",
-          body: prompt,
+          body: question,
           takeaways: [
             `Domain pack: ${domainLabels[domainId]}.`,
             "Read-only analysis completed before any task proposal.",
@@ -1158,31 +1256,38 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
 } {
   const timestamp = now();
   const projectId = input.project?.id ?? "proj-1";
-  const domainId = classifyDomain(input.prompt, input.datasets);
+  const domainId = classifyDomain(input.prompt);
   const dataset = pickDataset(domainId, input.datasets, input.tasks, projectId);
   const inspection = inspectDataset(dataset);
   const profile = profileMetrics(dataset);
   const segments = compareSegments(dataset);
   const trend = trendAnalysis(dataset);
   const effectiveness = effectivenessAnalysis(dataset);
+  const taskSummary = workspaceTaskSummary(dataset);
 
   const toolResults = [
     toolResult(
       "inspect_dataset",
       dataset.name,
-      `${inspection.rowCount} rows, ${inspection.columns.length} columns, ${inspection.dateColumns.length} date fields, ${inspection.entityColumns.length} entity fields.`,
+      taskSummary
+        ? `${taskSummary.statusLine} Current task evidence: ${taskSummary.focusLine || "No open tasks listed."}`
+        : `${inspection.rowCount} rows, ${inspection.columns.length} columns, ${inspection.dateColumns.length} date fields, ${inspection.entityColumns.length} entity fields.`,
       0,
     ),
     toolResult(
       "profile_metrics",
       dataset.name,
-      `${profile.numericTotals.length} numeric metrics, ${profile.categoryCounts.length} segment buckets, ${profile.missing.length} missing-data warnings.`,
+      taskSummary
+        ? `Task profile: ${taskSummary.highPriority.length} high-priority, ${taskSummary.researchTasks.length} research/finding-related, ${taskSummary.openTasks.length} still open.`
+        : `${profile.numericTotals.length} numeric metrics, ${profile.categoryCounts.length} segment buckets, ${profile.missing.length} missing-data warnings.`,
       1,
     ),
     toolResult(
       "compare_segments",
       dataset.name,
-      segments.length > 0
+      taskSummary
+        ? `Active focus: ${(taskSummary.inProgress.length > 0 ? taskSummary.inProgress : taskSummary.openTasks.slice(0, 2)).map(formatTaskReference).join("; ") || "No active focus task found."}`
+        : segments.length > 0
         ? `${segments[0].label} leads the segment comparison with ${segments[0].total} total value.`
         : "No usable segment and measure pair was found.",
       2,
@@ -1190,7 +1295,9 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
     toolResult(
       "trend_analysis",
       dataset.name,
-      trend.length > 0
+      taskSummary
+        ? `Next queue: ${taskSummary.todo.slice(0, 4).map(formatTaskReference).join("; ") || "No todo queue found."}`
+        : trend.length > 0
         ? `Trend spans ${trend[0].label} to ${trend[trend.length - 1].label}.`
         : "No usable date and measure pair was found.",
       3,
@@ -1198,7 +1305,9 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
     toolResult(
       "effectiveness_analysis",
       dataset.name,
-      effectiveness
+      taskSummary
+        ? `Evidence gap read: ${taskSummary.researchTasks.length > 0 ? taskSummary.researchTasks.map(formatTaskReference).join("; ") : "No explicit research or findings task is present; mark this as a gap."}`
+        : effectiveness
         ? `${effectiveness.exposureLabel} exposed rows average ${effectiveness.exposedAverage}; baseline averages ${effectiveness.baselineAverage}.`
         : "No exposure column was available for lift analysis.",
       4,

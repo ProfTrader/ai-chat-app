@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { toast } from "sonner";
+import { useDataStore } from "@/stores/data-store";
+import { useShellStore } from "@/stores/shell-store";
 
 const thinkingPhrases = [
   "Dexter is thinking through the request",
@@ -55,6 +57,14 @@ function getMessageText(message: UIMessage) {
     .join("\n");
 }
 
+function parseViewBriefMarker(text: string) {
+  const match = text.match(/\[\[nexus:view-brief:([^\]]+)]]/);
+  return {
+    runId: match?.[1],
+    cleanText: text.replace(/\n?\[\[nexus:view-brief:[^\]]+]]/g, "").trim(),
+  };
+}
+
 function StreamingPlaceholder() {
   return (
     <div className="flex min-w-52 flex-col gap-2 py-1">
@@ -81,11 +91,20 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const isUser = message.role === "user";
   const text = getMessageText(message);
+  const { runId, cleanText } = parseViewBriefMarker(text);
   const timestamp = formatRelativeTime(new Date().toISOString());
+  const selectWorkRun = useDataStore((state) => state.selectWorkRun);
+  const setActiveView = useShellStore((state) => state.setActiveView);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(cleanText);
     toast.success("Copied to clipboard");
+  };
+
+  const viewBrief = () => {
+    if (!runId) return;
+    selectWorkRun(runId);
+    setActiveView("briefs");
   };
 
   return (
@@ -103,7 +122,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
       >
         <span className="font-medium">{isUser ? "You" : "Assistant"}</span>
         <span>{timestamp}</span>
-        {!isUser && text && (
+        {!isUser && cleanText && (
           <Button
             variant="ghost"
             size="icon-xs"
@@ -126,7 +145,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
         {isStreaming && !text ? (
           <StreamingPlaceholder />
         ) : isUser ? (
-          text
+          cleanText
         ) : (
           <div className="flex flex-col gap-3">
             {message.parts.map((part, index) => {
@@ -136,13 +155,22 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
                     key={`${part.type}-${index}`}
                     className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2"
                   >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {parseViewBriefMarker(part.text).cleanText}
+                    </ReactMarkdown>
                   </div>
                 );
               }
 
               return null;
             })}
+            {runId && (
+              <div>
+                <Button size="sm" onClick={viewBrief}>
+                  View brief
+                </Button>
+              </div>
+            )}
             {isStreaming && text && <StreamingCursor />}
           </div>
         )}

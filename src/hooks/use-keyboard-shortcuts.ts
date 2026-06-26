@@ -2,6 +2,18 @@ import { useEffect } from "react";
 import { useShellStore } from "@/stores/shell-store";
 import type { ViewType } from "@/types";
 
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable ||
+    Boolean(target.closest("[contenteditable='true']"))
+  );
+}
+
 export function useKeyboardShortcuts() {
   const {
     setCommandOpen,
@@ -14,10 +26,19 @@ export function useKeyboardShortcuts() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      const editable = isEditableTarget(e.target);
 
       if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandOpen(true);
+        return;
+      }
+
+      if (editable) return;
+
+      if (mod && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen(true);
         return;
       }
 
