@@ -40,6 +40,7 @@ export async function createMoonshotChatStream(options: {
 }) {
   const { createUIMessageStream, generateId } = await import("ai");
   const systemPrompt = buildSystemPrompt(options.context);
+  const temperature = options.model.startsWith("kimi-k2.7") ? 1 : 0.2;
 
   return createUIMessageStream({
     execute: async ({ writer }) => {
@@ -90,7 +91,7 @@ export async function createMoonshotChatStream(options: {
         body: JSON.stringify({
           model: options.model,
           stream: true,
-          temperature: 0.2,
+          temperature,
           max_completion_tokens: 1200,
           messages: [
             { role: "system", content: systemPrompt },
