@@ -1,19 +1,76 @@
+import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { toast } from "sonner";
+
+const thinkingPhrases = [
+  "Dexter is thinking through the request",
+  "Dexter is pondering the useful angle",
+  "Dexter is lining up the context",
+  "Dexter is checking the next move",
+];
+
+function AsciiSpinner({ className }: { className?: string }) {
+  const frames = ["|", "/", "-", "\\"];
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setFrame((current) => (current + 1) % frames.length);
+    }, 140);
+
+    return () => window.clearInterval(interval);
+  }, [frames.length]);
+
+  return (
+    <span aria-hidden className={cn("inline-block w-[1ch] font-mono", className)}>
+      {frames[frame]}
+    </span>
+  );
+}
+
+function ThinkingPhrase() {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setPhraseIndex((current) => (current + 1) % thinkingPhrases.length);
+    }, 1800);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return <span>{thinkingPhrases[phraseIndex]}</span>;
+}
 
 function getMessageText(message: UIMessage) {
   return message.parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n");
+}
+
+function StreamingPlaceholder() {
+  return (
+    <div className="flex min-w-52 flex-col gap-2 py-1">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <AsciiSpinner className="text-active" />
+        <ThinkingPhrase />
+      </div>
+      <div className="h-2 w-48 rounded-full bg-muted nexus-shimmer" />
+      <div className="h-2 w-64 max-w-full rounded-full bg-muted nexus-shimmer" />
+      <div className="h-2 w-36 rounded-full bg-muted nexus-shimmer" />
+    </div>
+  );
+}
+
+function StreamingCursor() {
+  return <span className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-active" />;
 }
 
 interface ChatMessageProps {
@@ -60,22 +117,33 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
 
       <div
         className={cn(
-          "max-w-[88%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
+          "max-w-[88%] text-sm leading-relaxed",
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "border border-message-incoming-border bg-message-incoming-bg text-foreground",
+            ? "rounded-2xl bg-muted px-4 py-2.5 text-foreground"
+            : "px-1 py-1 text-foreground",
         )}
       >
         {isStreaming && !text ? (
-          <div className="flex items-center gap-2">
-            <Spinner />
-            <Skeleton className="h-4 w-32" />
-          </div>
+          <StreamingPlaceholder />
         ) : isUser ? (
           text
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          <div className="flex flex-col gap-3">
+            {message.parts.map((part, index) => {
+              if (part.type === "text") {
+                return (
+                  <div
+                    key={`${part.type}-${index}`}
+                    className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2"
+                  >
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+            {isStreaming && text && <StreamingCursor />}
           </div>
         )}
       </div>

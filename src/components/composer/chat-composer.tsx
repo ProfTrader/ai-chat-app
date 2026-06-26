@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ContextChipBadge } from "@/components/composer/context-chip";
@@ -24,18 +23,22 @@ export function ChatComposer() {
   const { projects } = useDataStore();
   const { send, stop, status } = useChatSession();
   const connected = useAuthStore((s) => s.status?.connected);
+  const refreshStatus = useAuthStore((s) => s.refreshStatus);
   const setActiveView = useShellStore((s) => s.setActiveView);
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
 
   const project = projects.find((p) => p.id === projectId);
-  const isStreaming = status === "streaming";
-  const disabled = !sessionId || !connected;
+  const isBusy = status === "submitted" || status === "streaming";
 
   const handleSend = useCallback(async () => {
     const text = composerText.trim();
     if (!text || !sessionId) return;
 
     if (!connected) {
+      await refreshStatus();
+    }
+
+    if (!useAuthStore.getState().status?.connected) {
       setSettingsOpen(true);
       return;
     }
@@ -46,6 +49,7 @@ export function ChatComposer() {
   }, [
     composerText,
     connected,
+    refreshStatus,
     resetComposer,
     send,
     sessionId,
@@ -102,7 +106,7 @@ export function ChatComposer() {
               connected ? "What should we tackle?" : "Configure a chat provider to enable chat"
             }
             rows={1}
-            disabled={disabled || isStreaming}
+            disabled={isBusy}
             className={cn(
               "field-sizing-content max-h-32 min-h-0 resize-none rounded-none border-0 bg-transparent px-3.5 pt-3 pb-1 text-sm shadow-none",
               "focus-visible:border-0 focus-visible:ring-0",
@@ -136,13 +140,13 @@ export function ChatComposer() {
               <span className="hidden truncate pl-1 text-xs text-muted-foreground sm:inline">
                 Nexus ·{" "}
                 <span className={composerMode === "auto" ? "text-fin" : undefined}>
-                  {composerMode === "plan" ? "Plan" : "Auto"}
+                  {isBusy ? "Running" : composerMode === "plan" ? "Plan" : "Auto"}
                 </span>
               </span>
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
-              {isStreaming ? (
+              {isBusy ? (
                 <Button variant="outline" size="icon-xs" onClick={stop}>
                   <Square data-icon="inline-start" />
                 </Button>
@@ -150,13 +154,9 @@ export function ChatComposer() {
                 <Button
                   size="icon-xs"
                   onClick={() => void handleSend()}
-                  disabled={!composerText.trim() || disabled}
+                  disabled={!composerText.trim() || isBusy}
                 >
-                  {status === "submitted" ? (
-                    <Spinner data-icon="inline-start" />
-                  ) : (
-                    <ArrowUp data-icon="inline-start" />
-                  )}
+                  <ArrowUp data-icon="inline-start" />
                 </Button>
               )}
             </div>

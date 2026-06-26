@@ -44,6 +44,42 @@ export async function createMoonshotChatStream(options: {
   return createUIMessageStream({
     execute: async ({ writer }) => {
       const messageId = generateId();
+      const activityId = generateId();
+
+      const writeActivity = (
+        status: "running" | "complete",
+        label: string,
+        detail: string,
+        toolName: string,
+      ) => {
+        writer.write({
+          type: "data-activity",
+          id: `${activityId}-${toolName}-${status}`,
+          data: {
+            status,
+            label,
+            detail,
+            toolName,
+            provider: "moonshot",
+            model: options.model,
+            at: new Date().toISOString(),
+          },
+        });
+      };
+
+      writer.write({ type: "start" });
+      writeActivity(
+        "complete",
+        "Project context inspected",
+        `${options.context.tasksSummary?.length ?? 0} task references and ${options.context.contextChips.length} context chips prepared.`,
+        "inspect_project_context",
+      );
+      writeActivity(
+        "running",
+        "Calling Moonshot",
+        `Streaming from ${options.model}.`,
+        "stream_remote_model",
+      );
 
       const response = await fetch(`${options.baseUrl}/chat/completions`, {
         method: "POST",
@@ -68,7 +104,6 @@ export async function createMoonshotChatStream(options: {
         throw new Error(details || `Moonshot request failed with status ${response.status}`);
       }
 
-      writer.write({ type: "start" });
       writer.write({ type: "text-start", id: messageId });
 
       const decoder = new TextDecoder();
@@ -97,6 +132,12 @@ export async function createMoonshotChatStream(options: {
       }
 
       writer.write({ type: "text-end", id: messageId });
+      writeActivity(
+        "complete",
+        "Moonshot response streamed",
+        "The assistant response finished without blocking the workspace.",
+        "stream_remote_model",
+      );
       writer.write({ type: "finish" });
     },
     onError: (error) => {

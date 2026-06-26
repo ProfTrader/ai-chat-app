@@ -33,9 +33,12 @@ export function CommandPalette() {
         <CommandEmpty>No results found.</CommandEmpty>
         <CommandGroup heading="Views">
           <CommandItem onSelect={() => navigate("chat")}>Go to Chat</CommandItem>
+          <CommandItem onSelect={() => navigate("briefs")}>Go to Briefs</CommandItem>
           <CommandItem onSelect={() => navigate("tasks")}>Go to Tasks</CommandItem>
           <CommandItem onSelect={() => navigate("board")}>Go to Board</CommandItem>
           <CommandItem onSelect={() => navigate("contacts")}>Go to Contacts</CommandItem>
+          <CommandItem onSelect={() => navigate("timeline")}>Go to Timeline</CommandItem>
+          <CommandItem onSelect={() => navigate("nodes")}>Go to Nodes</CommandItem>
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Projects">

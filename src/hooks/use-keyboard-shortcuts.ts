@@ -33,9 +33,9 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      if (mod && ["1", "2", "3", "4"].includes(e.key)) {
+      if (mod && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
         e.preventDefault();
-        const views: ViewType[] = ["chat", "tasks", "board", "contacts"];
+        const views: ViewType[] = ["chat", "briefs", "tasks", "board", "contacts", "timeline", "nodes"];
         setActiveView(views[Number(e.key) - 1]);
         return;
       }

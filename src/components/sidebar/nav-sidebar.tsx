@@ -4,10 +4,12 @@ import {
   Bell,
   Bot,
   Building2,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Columns3,
   ContactRound,
+  FileText,
   Inbox,
   LayoutDashboard,
   ListTodo,
@@ -57,9 +59,11 @@ const primaryViews: {
   count?: number;
 }[] = [
   { value: "chat", label: "Inbox", icon: Inbox, count: 3 },
+  { value: "briefs", label: "Briefs", icon: FileText },
   { value: "tasks", label: "Tasks", icon: ListTodo },
   { value: "board", label: "Board", icon: Columns3 },
   { value: "contacts", label: "Contacts", icon: ContactRound },
+  { value: "timeline", label: "Timeline", icon: CalendarDays },
   { value: "nodes", label: "Agent builder", icon: Network },
 ];
 

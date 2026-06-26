@@ -62,6 +62,11 @@ function TaskRow({
         {task.identifier}
       </span>
       <span className="min-w-0 flex-1 truncate text-base">{task.title}</span>
+      {task.sourceRunId ? (
+        <Badge variant="secondary" className="hidden font-normal sm:inline-flex">
+          From brief
+        </Badge>
+      ) : null}
       {assigneeName && task.assignee ? (
         <PersonAvatar
           name={assigneeName}

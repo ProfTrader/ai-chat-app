@@ -38,7 +38,14 @@ export function KanbanCard({ task, assignee, isFiltered }: KanbanCardProps) {
         )}
       >
         <CardHeader>
-          <CardDescription className="font-mono">{task.identifier}</CardDescription>
+          <CardDescription className="flex items-center gap-2">
+            <span className="font-mono">{task.identifier}</span>
+            {task.sourceRunId ? (
+              <Badge variant="secondary" className="font-normal">
+                From brief
+              </Badge>
+            ) : null}
+          </CardDescription>
           <CardTitle className="line-clamp-2">{task.title}</CardTitle>
         </CardHeader>
         {(assignee || task.priority || task.dueDate) && (

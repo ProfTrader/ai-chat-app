@@ -17,6 +17,14 @@ interface OllamaChatChunk {
   done?: boolean;
 }
 
+interface OllamaChatResponse {
+  message?: {
+    content?: string;
+  };
+  response?: string;
+  error?: string;
+}
+
 export function resolveOllamaBaseUrl(): string {
   return (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
 }
@@ -57,6 +65,42 @@ export async function createOllamaChatStream(options: {
   return createUIMessageStream({
     execute: async ({ writer }) => {
       const messageId = generateId();
+      const activityId = generateId();
+
+      const writeActivity = (
+        status: "running" | "complete",
+        label: string,
+        detail: string,
+        toolName: string,
+      ) => {
+        writer.write({
+          type: "data-activity",
+          id: `${activityId}-${toolName}-${status}`,
+          data: {
+            status,
+            label,
+            detail,
+            toolName,
+            provider: "ollama",
+            model: options.model,
+            at: new Date().toISOString(),
+          },
+        });
+      };
+
+      writer.write({ type: "start" });
+      writeActivity(
+        "complete",
+        "Project context inspected",
+        `${options.context.tasksSummary?.length ?? 0} task references and ${options.context.contextChips.length} context chips prepared.`,
+        "inspect_project_context",
+      );
+      writeActivity(
+        "running",
+        "Calling local model",
+        `Streaming from ${options.model} through Ollama.`,
+        "stream_local_model",
+      );
 
       const response = await fetch(`${options.baseUrl}/api/chat`, {
         method: "POST",
@@ -81,7 +125,6 @@ export async function createOllamaChatStream(options: {
         throw new Error(details || `Ollama request failed with status ${response.status}`);
       }
 
-      writer.write({ type: "start" });
       writer.write({ type: "text-start", id: messageId });
 
       const decoder = new TextDecoder();
@@ -107,6 +150,12 @@ export async function createOllamaChatStream(options: {
       }
 
       writer.write({ type: "text-end", id: messageId });
+      writeActivity(
+        "complete",
+        "Local model response streamed",
+        "The assistant response finished without blocking the workspace.",
+        "stream_local_model",
+      );
       writer.write({ type: "finish" });
     },
     onError: (error) => {
@@ -114,4 +163,40 @@ export async function createOllamaChatStream(options: {
       return "An error occurred while generating an Ollama response.";
     },
   });
+}
+
+export async function createOllamaChatCompletion(options: {
+  baseUrl: string;
+  model: string;
+  system: string;
+  user: string;
+  temperature?: number;
+}) {
+  const response = await fetch(`${options.baseUrl}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: options.model,
+      stream: false,
+      messages: [
+        { role: "system", content: options.system },
+        { role: "user", content: options.user },
+      ],
+      options: {
+        temperature: options.temperature ?? 0.2,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(details || `Ollama request failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as OllamaChatResponse;
+  if (data.error) throw new Error(data.error);
+
+  return (data.message?.content ?? data.response ?? "").trim();
 }

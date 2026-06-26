@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "./routes/auth.js";
+import { agent } from "./routes/agent.js";
 import { chat } from "./routes/chat.js";
 
 config();
@@ -21,6 +22,7 @@ app.use(
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api/auth", auth);
+app.route("/api/agent", agent);
 app.route("/api/chat", chat);
 
 const port = Number(process.env.PORT ?? 3001);

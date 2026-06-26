@@ -1,4 +1,4 @@
-import { Columns3, ContactRound, Inbox, ListTodo, Network } from "lucide-react";
+import { CalendarDays, Columns3, ContactRound, FileText, Inbox, ListTodo, Network } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChatSessionProvider } from "@/lib/chat/chat-session-provider";
@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/workspace/empty-state";
 import { TaskList } from "@/components/workspace/task-list";
 import { KanbanBoard } from "@/components/workspace/kanban-board";
 import { NodeManager } from "@/components/workspace/node-manager";
+import { BriefsWorkspace } from "@/components/workspace/briefs-workspace";
+import { TimelineWorkspace } from "@/components/workspace/timeline-workspace";
 import { ChatComposer } from "@/components/composer/chat-composer";
 import { useShellStore } from "@/stores/shell-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -18,9 +20,11 @@ import type { ViewType } from "@/types";
 
 const viewTabs: { value: ViewType; label: string; icon: typeof Inbox }[] = [
   { value: "chat", label: "Chat", icon: Inbox },
+  { value: "briefs", label: "Briefs", icon: FileText },
   { value: "tasks", label: "Tasks", icon: ListTodo },
   { value: "board", label: "Board", icon: Columns3 },
   { value: "contacts", label: "Contacts", icon: ContactRound },
+  { value: "timeline", label: "Timeline", icon: CalendarDays },
   { value: "nodes", label: "Nodes", icon: Network },
 ];
 
@@ -35,6 +39,10 @@ export function MainWorkspace() {
   const workspaceTitle =
     activeView === "nodes"
       ? "Workforce agent builder"
+      : activeView === "timeline"
+        ? "Project timeline"
+      : activeView === "briefs"
+        ? "Agentic briefs"
       : session?.title ?? project?.name ?? "Workspace";
 
   return (
@@ -45,6 +53,10 @@ export function MainWorkspace() {
           <p className="truncate text-xs text-muted-foreground">
             {activeView === "nodes"
               ? "Enterprise agent blueprint - internal workforce first"
+              : activeView === "timeline"
+                ? "Daily ledger and roadmap for project execution"
+              : activeView === "briefs"
+                ? "Plan, iterate, inspect, create, and audit dynamic intelligence artifacts"
               : `${project?.name ?? "Select a project"}${session ? ` - ${session.title}` : ""}`}
           </p>
         </div>
@@ -85,9 +97,11 @@ export function MainWorkspace() {
             <ChatComposer />
           </ChatSessionProvider>
         )}
+        {activeView === "briefs" && <BriefsWorkspace />}
         {activeView === "tasks" && <TaskList />}
         {activeView === "board" && <KanbanBoard />}
         {activeView === "contacts" && <ContactList />}
+        {activeView === "timeline" && <TimelineWorkspace />}
         {activeView === "nodes" && <NodeManager />}
       </div>
     </div>

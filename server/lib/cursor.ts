@@ -28,9 +28,45 @@ export async function createCursorChatStream(options: {
   return createUIMessageStream({
     execute: async ({ writer }) => {
       const messageId = generateId();
+      const activityId = generateId();
       let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
 
       try {
+        const writeActivity = (
+          status: "running" | "complete",
+          label: string,
+          detail: string,
+          toolName: string,
+        ) => {
+          writer.write({
+            type: "data-activity",
+            id: `${activityId}-${toolName}-${status}`,
+            data: {
+              status,
+              label,
+              detail,
+              toolName,
+              provider: "cursor",
+              model: options.model,
+              at: new Date().toISOString(),
+            },
+          });
+        };
+
+        writer.write({ type: "start" });
+        writeActivity(
+          "complete",
+          "Project context inspected",
+          `${options.context.tasksSummary?.length ?? 0} task references and ${options.context.contextChips.length} context chips prepared.`,
+          "inspect_project_context",
+        );
+        writeActivity(
+          "running",
+          "Starting Cursor agent",
+          `Creating a local agent session with ${options.model}.`,
+          "start_cursor_agent",
+        );
+
         agent = await Agent.create({
           apiKey: options.apiKey,
           model: { id: options.model },
@@ -38,7 +74,12 @@ export async function createCursorChatStream(options: {
         });
 
         const run = await agent.send(prompt);
-        writer.write({ type: "start" });
+        writeActivity(
+          "complete",
+          "Cursor agent connected",
+          "The agent session is streaming assistant events.",
+          "start_cursor_agent",
+        );
         writer.write({ type: "text-start", id: messageId });
 
         let lastText = "";

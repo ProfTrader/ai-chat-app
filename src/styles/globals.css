@@ -280,3 +280,30 @@
     @apply font-medium tracking-tight text-foreground;
   }
 }
+
+@layer utilities {
+  .nexus-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .nexus-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--active) 18%, transparent),
+      transparent
+    );
+    animation: nexus-shimmer 1.25s ease-in-out infinite;
+  }
+
+  @keyframes nexus-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}

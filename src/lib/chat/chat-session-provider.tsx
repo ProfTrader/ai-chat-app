@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useChat } from "@ai-sdk/react";
@@ -34,11 +35,42 @@ interface ChatSessionContextValue {
   messages: UIMessage[];
   status: ReturnType<typeof useChat>["status"];
   error: Error | undefined;
+  activities: ChatActivity[];
   send: (text: string) => Promise<void>;
   stop: () => void;
 }
 
+export interface ChatActivity {
+  id: string;
+  status: "running" | "complete" | "error";
+  label: string;
+  detail: string;
+  toolName: string;
+  provider?: string;
+  model?: string;
+}
+
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
+
+function normalizeActivity(part: { id?: string; data?: unknown }): ChatActivity {
+  const data =
+    part.data && typeof part.data === "object"
+      ? (part.data as Record<string, unknown>)
+      : {};
+
+  return {
+    id: part.id ?? `${Date.now()}`,
+    status:
+      data.status === "complete" || data.status === "error" || data.status === "running"
+        ? data.status
+        : "running",
+    label: typeof data.label === "string" ? data.label : "Agent activity",
+    detail: typeof data.detail === "string" ? data.detail : "",
+    toolName: typeof data.toolName === "string" ? data.toolName : "runtime",
+    provider: typeof data.provider === "string" ? data.provider : undefined,
+    model: typeof data.model === "string" ? data.model : undefined,
+  };
+}
 
 export function ChatSessionProvider({
   sessionId,
@@ -50,11 +82,13 @@ export function ChatSessionProvider({
   const getMessagesBySession = useDataStore((s) => s.getMessagesBySession);
   const persistChatMessage = useDataStore((s) => s.persistChatMessage);
   const updateSessionTitle = useDataStore((s) => s.updateSessionTitle);
+  const createWorkRunFromPrompt = useDataStore((s) => s.createWorkRunFromPrompt);
   const { projects, workspaces, getTasksByProject } = useDataStore();
   const { projectId, contextChips } = useSelectionStore();
   const { composerMode } = useChatStore();
   const { status: authStatus } = useAuthStore();
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
+  const [activities, setActivities] = useState<ChatActivity[]>([]);
 
   const project = projects.find((p) => p.id === projectId);
   const workspace = workspaces.find((w) => w.id === project?.workspaceId);
@@ -108,6 +142,14 @@ export function ChatSessionProvider({
     id: sessionId ?? "empty-session",
     messages: initialMessages,
     transport,
+    onData: (part) => {
+      if (part.type !== "data-activity") return;
+      const activity = normalizeActivity(part);
+      setActivities((current) => [
+        ...current.filter((item) => item.id !== activity.id),
+        activity,
+      ]);
+    },
     onError: (error) => {
       const code = (error as Error & { code?: string }).code;
       if (code === "AUTH_REQUIRED") {
@@ -127,9 +169,11 @@ export function ChatSessionProvider({
   useEffect(() => {
     if (!sessionId) {
       chat.setMessages([]);
+      setActivities([]);
       return;
     }
     chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    setActivities([]);
   }, [sessionId]);
 
   const send = async (text: string) => {
@@ -143,7 +187,13 @@ export function ChatSessionProvider({
       return;
     }
 
+    setActivities([]);
     await persistChatMessage(sessionId, text, "user");
+    if (composerMode === "plan") {
+      await createWorkRunFromPrompt(text, projectId ?? undefined);
+      toast.success("Plan artifact created in Briefs.");
+    }
+
     const sessionMessages = getMessagesBySession(sessionId);
     if (sessionMessages.filter((m) => m.role === "user").length === 1) {
       void updateSessionTitle(sessionId, text);
@@ -156,6 +206,7 @@ export function ChatSessionProvider({
     messages: chat.messages,
     status: chat.status,
     error: chat.error,
+    activities,
     send,
     stop: chat.stop,
   };
