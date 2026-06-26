@@ -89,6 +89,7 @@ export type DatasetSemanticRole =
   | "channel"
   | "author"
   | "engagement"
+  | "score"
   | "status"
   | "priority"
   | "owner";
@@ -110,6 +111,16 @@ export interface ProjectDataset {
   name: string;
   domainId: AgentDomainId;
   sourceKind: DatasetSourceKind;
+  sourceMetadata?: {
+    kind: "knowledge_pack";
+    packId: string;
+    label: string;
+    sourceName: string;
+    sourceUrl: string;
+    license?: string;
+    notes?: string;
+    useCases: string[];
+  };
   columns: DatasetColumn[];
   rows: Array<Record<string, DatasetRowValue>>;
   createdAt: string;
@@ -397,6 +408,18 @@ export interface ArtifactSection {
   blocks: ArtifactBlock[];
 }
 
+export interface HtmlBriefArtifact {
+  id: string;
+  fileName: string;
+  title: string;
+  html: string;
+  createdAt: string;
+  sourceDraftId: string;
+  visualizationCount: number;
+  tableCount: number;
+  evidenceCount: number;
+}
+
 export interface DraftArtifact {
   id: string;
   version: number;
@@ -413,6 +436,7 @@ export interface DraftArtifact {
   recommendations: string[];
   visualizations: VisualizationBlock[];
   artifactSections?: ArtifactSection[];
+  htmlArtifact?: HtmlBriefArtifact;
   createdAt: string;
 }
 

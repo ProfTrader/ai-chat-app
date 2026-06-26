@@ -16,6 +16,13 @@ import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
 import type { Message } from "@/types";
 
+interface PendingBriefPlan {
+  id: string;
+  prompt: string;
+  markdown: string;
+  createdAt: string;
+}
+
 function messageToUi(message: Message): UIMessage {
   return {
     id: message.id,
@@ -59,6 +66,20 @@ function shouldRouteToBrief(text: string, previousMessages: Message[]) {
   return (artifactIntent && (createIntent || analysisBriefIntent || bareBriefIntent)) || continuationIntent;
 }
 
+function isBriefApproval(text: string) {
+  return /\b(approve|approved|proceed|go ahead|create it|generate it|build it|make it|start production|run it)\b/i.test(
+    text,
+  );
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "brief-plan";
+}
+
 function buildBriefPrompt(text: string, previousMessages: Message[], projectName?: string) {
   const recentUserContext = previousMessages
     .slice(-8)
@@ -78,6 +99,53 @@ Recent user intent:
 ${recentUserContext}
 
 Do not ask clarifying questions. Use available workspace evidence, cite what is known, and mark missing information as evidence gaps or assumptions.`;
+}
+
+function buildBriefPlanMarkdown({
+  userRequest,
+  projectName,
+}: {
+  userRequest: string;
+  projectName?: string;
+}) {
+  const planTitle = `${slugify(userRequest)}.md`;
+  const needsCompetitiveResearch = /\b(competitor|competitive|market|benchmark|category|dossier|websearch|web search)\b/i.test(userRequest);
+  const primaryDataset =
+    /\b(prop|trader|funded|evaluation|payout|breach|p&l|pnl)\b/i.test(userRequest)
+      ? "Prop firm operating dataset: up to 1000 trading accounts with daily revenue, payouts, breaches, worker overhead, and KPI signals."
+      : /\b(bank|banking|kyc|entitlement|churn|complaint|sentiment)\b/i.test(userRequest)
+        ? "Banking knowledge packs: account health, KYC/entitlement flags, complaints, and sentiment/news context."
+        : "Selected project datasets and public-source knowledge packs in the Briefs data panel.";
+
+  return [
+    `# ${planTitle}`,
+    "",
+    "## Objective",
+    `Create an HTML brief artifact for **${projectName ?? "the selected project"}** from the approved request:`,
+    "",
+    `> ${userRequest}`,
+    "",
+    "## Primary Data",
+    `- ${primaryDataset}`,
+    "- Workspace tasks, contacts, recent chat context, and any added knowledge packs will be treated as evidence.",
+    "- The model will use database evidence and representative text snippets; charts, tables, and audit checks remain deterministic.",
+    "",
+    "## Analysis Plan",
+    "- Inspect available datasets, typed columns, row counts, source metadata, and missing fields.",
+    "- Profile metrics, segment mix, trend movement, and effectiveness/lift where usable exposure fields exist.",
+    "- Draft source-backed findings, recommendations, assumptions, and handoff actions.",
+    needsCompetitiveResearch
+      ? "- If competitive/web research is required, cite supplied/public source URLs in the evidence appendix; do not treat uncited web claims as facts."
+      : "- Use only available workspace/database evidence unless the user supplies external sources.",
+    "",
+    "## HTML Production Plan",
+    "- Build the HTML artifact from the model-written narrative plus deterministic KPI, chart, table, evidence, and audit blocks.",
+    "- Stream visible production stages in chat: data inspection, model drafting, audit, HTML scaffold, visual blocks, evidence appendix, and final file.",
+    "- Save the artifact in Briefs with Preview and HTML download actions.",
+    "",
+    "## Approval Gate",
+    "Reply **approve**, **proceed**, or **create it** to start HTML production.",
+  ].join("\n");
 }
 
 interface ChatSessionContextValue {
@@ -139,6 +207,7 @@ export function ChatSessionProvider({
   const { status: authStatus } = useAuthStore();
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
   const [activities, setActivities] = useState<ChatActivity[]>([]);
+  const [pendingBriefPlan, setPendingBriefPlan] = useState<PendingBriefPlan | null>(null);
 
   const project = projects.find((p) => p.id === projectId);
   const workspace = workspaces.find((w) => w.id === project?.workspaceId);
@@ -220,10 +289,12 @@ export function ChatSessionProvider({
     if (!sessionId) {
       chat.setMessages([]);
       setActivities([]);
+      setPendingBriefPlan(null);
       return;
     }
     chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
     setActivities([]);
+    setPendingBriefPlan(null);
   }, [sessionId]);
 
   const send = async (text: string) => {
@@ -240,37 +311,84 @@ export function ChatSessionProvider({
     setActivities([]);
     const previousMessages = getMessagesBySession(sessionId);
     await persistChatMessage(sessionId, text, "user");
-    const shouldCreateBrief = composerMode === "plan" || shouldRouteToBrief(text, previousMessages);
+    const approvedBriefPlan = pendingBriefPlan && isBriefApproval(text) ? pendingBriefPlan : null;
+    const shouldPlanBrief =
+      !approvedBriefPlan &&
+      (composerMode === "plan" || shouldRouteToBrief(text, previousMessages));
 
     const sessionMessages = getMessagesBySession(sessionId);
     if (sessionMessages.filter((m) => m.role === "user").length === 1) {
       void updateSessionTitle(sessionId, text);
     }
 
-    if (shouldCreateBrief) {
+    if (shouldPlanBrief) {
+      const modelPrompt = buildBriefPrompt(text, previousMessages, project?.name);
+      const markdown = buildBriefPlanMarkdown({
+        userRequest: text,
+        projectName: project?.name,
+      });
+      setPendingBriefPlan({
+        id: `brief-plan-${crypto.randomUUID().slice(0, 8)}`,
+        prompt: modelPrompt,
+        markdown,
+        createdAt: new Date().toISOString(),
+      });
+      await persistChatMessage(
+        sessionId,
+        [
+          "I prepared the markdown plan for the HTML brief artifact. I will not create the artifact until you approve it.",
+          "",
+          markdown,
+        ].join("\n"),
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      return;
+    }
+
+    if (approvedBriefPlan) {
       const assistant = await persistChatMessage(
         sessionId,
-        "Dexter is creating the HTML brief artifact...\n\n- Understanding request",
+        [
+          "Approved. Dexter is producing the HTML brief artifact...",
+          "",
+          "## HTML production stream",
+          "",
+          "**Current:** Starting production from the approved markdown plan",
+        ].join("\n"),
         "assistant",
       );
       chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
 
-      const progress: string[] = [];
+      const completedProgress: string[] = [];
+      let currentProgress = "Starting production from the approved markdown plan";
+      const buildProgressBody = (current?: string) => [
+        "Approved. Dexter is producing the HTML brief artifact...",
+        "",
+        "## HTML production stream",
+        "",
+        ...(current ? [`**Current:** ${current}`, ""] : []),
+        ...(completedProgress.length > 0
+          ? [
+              "**Completed:**",
+              ...completedProgress.map((item) => `- ${item}`),
+            ]
+          : []),
+      ].join("\n");
       const renderProgress = (line: string) => {
-        if (!progress.includes(line)) progress.push(line);
-        const body = [
-          "Dexter is creating the HTML brief artifact...",
-          "",
-          ...progress.map((item) => `- ${item}`),
-        ].join("\n");
-        void updateMessageContent(assistant.id, body).then(() => {
+        if (currentProgress && currentProgress !== line && !completedProgress.includes(currentProgress)) {
+          completedProgress.push(currentProgress);
+        }
+        currentProgress = line;
+        void updateMessageContent(assistant.id, buildProgressBody(currentProgress)).then(() => {
           chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
         });
       };
 
       try {
+        renderProgress("Approval received: locked markdown plan and started artifact production");
         const run = await createArtifactRunFromPromptStream(
-          buildBriefPrompt(text, previousMessages, project?.name),
+          approvedBriefPlan.prompt,
           projectId ?? undefined,
           (event) => {
             if (event.data.label) {
@@ -279,16 +397,27 @@ export function ChatSessionProvider({
           },
         );
 
+        if (currentProgress && !completedProgress.includes(currentProgress)) {
+          completedProgress.push(currentProgress);
+        }
         await updateMessageContent(
           assistant.id,
           [
+            "## HTML production stream",
+            "",
+            "**Completed:**",
+            ...completedProgress.map((item) => `- ${item}`),
+            "",
             `Created **${run.title}**.`,
             "",
-            "The HTML artifact is ready in Briefs with evidence, tables, charts, recommendations, and audit status.",
+            "The approved HTML artifact is ready in Briefs with evidence, tables, charts, recommendations, source notes, and audit status.",
+            "",
+            `File: \`${run.drafts[run.drafts.length - 1]?.htmlArtifact?.fileName ?? "brief-artifact.html"}\``,
             "",
             `[[nexus:view-brief:${run.id}]]`,
           ].join("\n"),
         );
+        setPendingBriefPlan(null);
         chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
         toast.success("Brief artifact created.");
       } catch (error) {

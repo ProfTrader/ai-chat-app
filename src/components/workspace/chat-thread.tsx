@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Empty,
   EmptyContent,
@@ -10,11 +9,27 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageHeader,
+} from "@/components/ui/message";
+import { Spinner } from "@/components/ui/spinner";
 import { ChatMessage } from "@/components/workspace/chat-message";
 import { useChatSession } from "@/lib/chat/chat-session-provider";
 import { useAuthStore } from "@/stores/auth-store";
 import { useShellStore } from "@/stores/shell-store";
-import { cn } from "@/lib/utils";
 
 const thinkingPhrases = [
   "Dexter is thinking through the request",
@@ -22,25 +37,6 @@ const thinkingPhrases = [
   "Dexter is lining up the context",
   "Dexter is checking the next move",
 ];
-
-function AsciiSpinner({ className }: { className?: string }) {
-  const frames = ["|", "/", "-", "\\"];
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setFrame((current) => (current + 1) % frames.length);
-    }, 140);
-
-    return () => window.clearInterval(interval);
-  }, [frames.length]);
-
-  return (
-    <span aria-hidden className={cn("inline-block w-[1ch] font-mono", className)}>
-      {frames[frame]}
-    </span>
-  );
-}
 
 function ThinkingPhrase() {
   const [phraseIndex, setPhraseIndex] = useState(0);
@@ -56,29 +52,28 @@ function ThinkingPhrase() {
   return <span>{thinkingPhrases[phraseIndex]}</span>;
 }
 
-function AssistantWarmupMessage() {
+function AssistantWarmupMarker() {
   return (
-    <div className="flex w-full flex-col items-start gap-1.5">
-      <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-        <span className="font-medium">Assistant</span>
-        <span>now</span>
-      </div>
-      <div className="max-w-[88%] px-1 py-1">
-        <div className="flex items-start gap-2">
-          <AsciiSpinner className="mt-0.5 shrink-0 text-xs text-active" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm text-muted-foreground">
-              <ThinkingPhrase />
-            </div>
-            <div className="mt-3 grid gap-2">
-              <div className="h-2 w-48 rounded-full bg-muted nexus-shimmer" />
-              <div className="h-2 w-72 max-w-full rounded-full bg-muted nexus-shimmer" />
-              <div className="h-2 w-36 rounded-full bg-muted nexus-shimmer" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <Message align="start" className="items-end">
+      <MessageAvatar className="bg-transparent">
+        <Avatar size="sm" className="bg-primary/10">
+          <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
+        </Avatar>
+      </MessageAvatar>
+      <MessageContent className="max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5">
+        <MessageHeader className="px-1">
+          <span>Dexter</span>
+        </MessageHeader>
+        <Marker role="status" className="w-fit px-1">
+          <MarkerIcon>
+            <Spinner role="presentation" aria-hidden="true" className="text-active" />
+          </MarkerIcon>
+          <MarkerContent className="shimmer">
+            <ThinkingPhrase />
+          </MarkerContent>
+        </Marker>
+      </MessageContent>
+    </Message>
   );
 }
 
@@ -86,11 +81,6 @@ export function ChatThread() {
   const { messages, status } = useChatSession();
   const connected = useAuthStore((s) => s.status?.connected);
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, status]);
 
   if (messages.length === 0) {
     return (
@@ -122,18 +112,34 @@ export function ChatThread() {
   const hasAssistantInFlight = Boolean(streamingAssistantId);
 
   return (
-    <ScrollArea className="h-full w-full min-w-0 bg-chat-surface">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-5 py-6 pb-32">
-        {messages.map((message) => (
-          <ChatMessage
-            key={message.id}
-            message={message}
-            isStreaming={message.id === streamingAssistantId}
-          />
-        ))}
-        {status === "submitted" && !hasAssistantInFlight && <AssistantWarmupMessage />}
-        <div ref={bottomRef} />
-      </div>
-    </ScrollArea>
+    <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
+      <MessageScroller className="h-full w-full min-w-0 bg-chat-surface">
+        <MessageScrollerViewport className="scroll-fade-y">
+          <MessageScrollerContent
+            aria-busy={status === "submitted" || status === "streaming"}
+            className="mx-auto w-full max-w-3xl gap-5 px-5 py-6 pb-32"
+          >
+            {messages.map((message) => (
+              <MessageScrollerItem
+                key={message.id}
+                messageId={message.id}
+                scrollAnchor={message.role === "user"}
+              >
+                <ChatMessage
+                  message={message}
+                  isStreaming={message.id === streamingAssistantId}
+                />
+              </MessageScrollerItem>
+            ))}
+            {status === "submitted" && !hasAssistantInFlight && (
+              <MessageScrollerItem messageId="assistant-warmup">
+                <AssistantWarmupMarker />
+              </MessageScrollerItem>
+            )}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
   );
 }

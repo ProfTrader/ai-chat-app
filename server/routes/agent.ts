@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
   createOllamaChatCompletion,
@@ -6,6 +6,14 @@ import {
   resolveOllamaModel,
   validateOllamaModel,
 } from "../lib/ollama.js";
+import {
+  resolveMoonshotApiKey,
+  resolveMoonshotBaseUrl,
+  resolveMoonshotModel,
+  validateMoonshotApiKey,
+} from "../lib/auth.js";
+import { createMoonshotChatCompletion } from "../lib/moonshot.js";
+import { loadTradeifyDesignBrief } from "../lib/artifact-design.js";
 
 const agent = new Hono();
 
@@ -31,12 +39,42 @@ agent.get("/tools", (c) => c.json({ tools }));
 function parseModelJson(content: string) {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
   const candidate = fenced ?? content;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Ollama did not return JSON.");
+  const json = findBalancedJsonObject(candidate) ?? findBalancedJsonObject(content);
+  if (!json) {
+    throw new Error("The model did not return JSON.");
   }
-  return JSON.parse(candidate.slice(start, end + 1)) as unknown;
+  return JSON.parse(json) as unknown;
+}
+
+function findBalancedJsonObject(content: string) {
+  const start = content.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) return content.slice(start, index + 1);
+  }
+
+  return null;
 }
 
 function normalizeModelText(value: string) {
@@ -73,7 +111,7 @@ const polishRequestSchema = z.object({
 const polishResponseSchema = z.object({
   summary: z.string().min(40),
   thesis: z.string().min(40),
-  takeaways: z.array(z.string().min(8)).min(3).max(5),
+  takeaways: z.array(z.string().min(8)).min(1).max(5),
   modelNote: z.string().min(8).max(160),
 });
 
@@ -135,7 +173,7 @@ const briefResponseSchema = z.object({
   title: z.string().min(8).max(140),
   executiveSummary: z.string().min(80),
   thesis: z.string().min(40),
-  takeaways: z.array(z.string().min(8)).min(3).max(5),
+  takeaways: z.array(z.string().min(8)).min(1).max(5),
   findings: z
     .array(
       z.object({
@@ -145,7 +183,7 @@ const briefResponseSchema = z.object({
         assumption: z.boolean().optional(),
       }),
     )
-    .min(3)
+    .min(1)
     .max(6),
   recommendations: z
     .array(
@@ -156,7 +194,7 @@ const briefResponseSchema = z.object({
         sourceIds: z.array(z.string()).default([]),
       }),
     )
-    .min(3)
+    .min(1)
     .max(6),
   sectionNarratives: z
     .array(
@@ -171,6 +209,104 @@ const briefResponseSchema = z.object({
 });
 
 type BriefResponse = z.infer<typeof briefResponseSchema>;
+
+function ensureMinLength(value: string, minimum: number) {
+  const normalized = normalizeModelText(value);
+  if (normalized.length >= minimum) return normalized;
+  return `${normalized} This statement is preserved from the model narrative and requires evidence review before publishing.`.slice(0, Math.max(minimum, normalized.length + 120));
+}
+
+function firstSentences(value: string, count: number) {
+  const sentences = normalizeModelText(value)
+    .split(/(?<=[.!?])\s+/)
+    .filter(Boolean)
+    .slice(0, count)
+    .join(" ");
+  return sentences || normalizeModelText(value).slice(0, 500);
+}
+
+function decodeJsonString(value: string) {
+  try {
+    return JSON.parse(`"${value.replace(/\n/g, "\\n")}"`) as string;
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\n/g, " ");
+  }
+}
+
+function extractStringField(content: string, field: string) {
+  const match = content.match(new RegExp(`"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  return match ? normalizeModelText(decodeJsonString(match[1])) : "";
+}
+
+function extractStringArrayField(content: string, field: string) {
+  const match = content.match(new RegExp(`"${field}"\\s*:\\s*\\[([\\s\\S]*?)\\]`));
+  if (!match) return [];
+  return [...match[1].matchAll(/"((?:\\.|[^"\\])*)"/g)]
+    .map((item) => normalizeModelText(decodeJsonString(item[1])))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function cleanModelNarrative(content: string) {
+  const extracted = [
+    extractStringField(content, "executiveSummary"),
+    extractStringField(content, "thesis"),
+    ...extractStringArrayField(content, "takeaways"),
+  ].filter(Boolean);
+  if (extracted.length) return normalizeModelText(extracted.join(" "));
+
+  return normalizeModelText(
+    content
+      .replace(/```(?:json)?/gi, " ")
+      .replace(/```/g, " ")
+      .replace(/"[^"]+"\s*:/g, " ")
+      .replace(/[{}\[\],]/g, " "),
+  );
+}
+
+function salvageBriefResponseFromModelText(content: string): BriefResponse {
+  const narrative = ensureMinLength(cleanModelNarrative(content), 120);
+  const summary = ensureMinLength(extractStringField(content, "executiveSummary") || firstSentences(narrative, 4), 80);
+  const thesis = ensureMinLength(extractStringField(content, "thesis") || firstSentences(narrative, 2), 40);
+  const takeaways = extractStringArrayField(content, "takeaways");
+  const finding = ensureMinLength(extractStringField(content, "claim") || firstSentences(narrative, 1), 12);
+  const recommendation = ensureMinLength(extractStringField(content, "action") || "Review the preserved model narrative against the evidence appendix before publishing.", 12);
+
+  return briefResponseSchema.parse({
+    title: extractStringField(content, "title") || "Model-written brief narrative",
+    executiveSummary: summary,
+    thesis,
+    takeaways: [
+      ...(takeaways.length ? takeaways : [ensureMinLength(firstSentences(narrative, 1), 8)]),
+      "Model narrative was preserved after non-strict JSON and should be checked against evidence.",
+      "Deterministic Nexus charts, tables, and audit blocks remain the publishing source of truth.",
+    ].slice(0, 5),
+    findings: [
+      {
+        claim: finding,
+        citationIds: [],
+        confidence: 0.62,
+        assumption: true,
+      },
+    ],
+    recommendations: [
+      {
+        action: recommendation,
+        priority: "medium",
+        expectedImpact: extractStringField(content, "expectedImpact") || "Keeps the model contribution available while preserving audit discipline.",
+        sourceIds: [],
+      },
+    ],
+    sectionNarratives: [
+      {
+        sectionTitle: "Model Narrative",
+        body: narrative.slice(0, 1800),
+        takeaways: [ensureMinLength(firstSentences(narrative, 1), 8)],
+      },
+    ],
+    modelNotes: "Model returned non-strict JSON; Nexus preserved its narrative and marked unsupported items for review.",
+  });
+}
 
 function normalizeBriefResponse(parsed: BriefResponse): BriefResponse {
   return {
@@ -196,31 +332,83 @@ function normalizeBriefResponse(parsed: BriefResponse): BriefResponse {
   };
 }
 
+type BriefProvider = "moonshot" | "ollama";
+
+interface BriefModelConfig {
+  provider: BriefProvider;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+async function resolveBriefModel(c: Context, requestedModel?: string | null): Promise<BriefModelConfig | null> {
+  const moonshotApiKey = await resolveMoonshotApiKey(c);
+  if (moonshotApiKey && (await validateMoonshotApiKey(moonshotApiKey))) {
+    return {
+      provider: "moonshot",
+      model: resolveMoonshotModel(requestedModel),
+      apiKey: moonshotApiKey,
+      baseUrl: resolveMoonshotBaseUrl(),
+    };
+  }
+
+  const ollamaModel = resolveOllamaModel(requestedModel);
+  if (await validateOllamaModel(ollamaModel)) {
+    return {
+      provider: "ollama",
+      model: ollamaModel,
+    };
+  }
+
+  return null;
+}
+
 async function createStructuredBrief(options: {
+  provider: BriefProvider;
   model: string;
   user: string;
   repair?: string;
+  apiKey?: string;
+  baseUrl?: string;
 }) {
-  const content = await createOllamaChatCompletion({
-    baseUrl: resolveOllamaBaseUrl(),
-    model: options.model,
-    system:
-      "You are Gemma 4 running locally for Nexus. You write polished business research briefs from supplied evidence only. Never invent metrics, rows, chart values, task mutations, board changes, or source IDs. Return strict JSON only.",
-    user: options.repair
-      ? `${options.user}\n\nThe previous response failed validation:\n${options.repair}\n\nReturn corrected strict JSON only.`
-      : options.user,
-    temperature: options.repair ? 0.05 : 0.15,
-  });
+  const system =
+    options.provider === "moonshot"
+      ? "You are Kimi running for Nexus. You write polished business research briefs from supplied evidence only. Never invent metrics, rows, chart values, task mutations, board changes, or source IDs. Return strict JSON only."
+      : "You are Gemma 4 running locally for Nexus. You write polished business research briefs from supplied evidence only. Never invent metrics, rows, chart values, task mutations, board changes, or source IDs. Return strict JSON only.";
+  const user = options.repair
+    ? `${options.user}\n\nThe previous response failed validation:\n${options.repair}\n\nReturn corrected strict JSON only.`
+    : options.user;
+  const content =
+    options.provider === "moonshot"
+      ? await createMoonshotChatCompletion({
+          apiKey: options.apiKey ?? "",
+          baseUrl: options.baseUrl ?? resolveMoonshotBaseUrl(),
+          model: options.model,
+          system,
+          user,
+          temperature: options.model.startsWith("kimi-k2.7") ? 1 : options.repair ? 0.1 : undefined,
+          maxTokens: options.repair ? 3200 : 4200,
+        })
+      : await createOllamaChatCompletion({
+          baseUrl: resolveOllamaBaseUrl(),
+          model: options.model,
+          system,
+          user,
+          temperature: options.repair ? 0.05 : 0.15,
+        });
 
   try {
     return briefResponseSchema.parse(parseModelJson(content));
   } catch (error) {
-    if (options.repair) throw error;
+    if (options.repair) return salvageBriefResponseFromModelText(content);
     const repair = error instanceof Error ? error.message : "The response did not match the schema.";
     return createStructuredBrief({
+      provider: options.provider,
       model: options.model,
       user: `${options.user}\n\nInvalid response that must be repaired:\n${content.slice(0, 5000)}`,
       repair,
+      apiKey: options.apiKey,
+      baseUrl: options.baseUrl,
     });
   }
 }
@@ -254,15 +442,14 @@ agent.post("/brief", async (c) => {
     return c.json({ used: false, code: "INVALID_REQUEST", message: "Invalid brief request." }, 400);
   }
 
-  const model = resolveOllamaModel(body.data.model);
-  const valid = await validateOllamaModel(model);
-  if (!valid) {
+  const briefModel = await resolveBriefModel(c, body.data.model);
+  if (!briefModel) {
     return c.json(
       {
         used: false,
-        code: "OLLAMA_MODEL_NOT_FOUND",
-        message: `Ollama model ${model} is not available locally.`,
-        model,
+        code: "MODEL_NOT_AVAILABLE",
+        message: "No configured Moonshot/Kimi key or local Ollama model is available for brief generation.",
+        model: body.data.model,
       },
       200,
     );
@@ -289,6 +476,7 @@ agent.post("/brief", async (c) => {
         `- ${section.title}: ${section.purpose ?? "No stated purpose"} (${section.blocks.length} artifact blocks)`,
     )
     .join("\n");
+  const designBrief = await loadTradeifyDesignBrief();
 
   const user = `Write the structured Nexus brief narrative from this deterministic analysis.
 
@@ -319,10 +507,14 @@ ${toolTrace || "- No tool trace supplied."}
 Artifact section skeleton:
 ${sectionSkeleton || "- Use the existing Nexus report structure."}
 
+Design brief the agent must remember:
+${designBrief}
+
 Rules:
 - Keep all numerical claims exactly as supplied by evidence or tool trace.
 - citationIds and sourceIds must be selected only from the allowed evidence IDs above.
 - If a useful idea has no evidence ID, set assumption to true and leave citationIds empty.
+- Use the design brief for tone and HTML presentation intent, but do not invent Tradeify operating metrics or competitor facts.
 - Do not mention task, board, owner, or roadmap changes as already applied.
 - Return only JSON with this shape:
 {
@@ -343,20 +535,20 @@ Rules:
 }`;
 
   try {
-    const parsed = await createStructuredBrief({ model, user });
+    const parsed = await createStructuredBrief({ ...briefModel, user });
     return c.json({
       used: true,
-      provider: "ollama",
-      model,
+      provider: briefModel.provider,
+      model: briefModel.model,
       ...normalizeBriefResponse(parsed),
     });
   } catch (error) {
-    console.error("Agent Ollama brief error:", error);
+    console.error("Agent model brief error:", error);
     return c.json({
       used: false,
-      code: "OLLAMA_BRIEF_FAILED",
-      message: error instanceof Error ? error.message : "Failed to generate brief with Ollama.",
-      model,
+      code: "MODEL_BRIEF_FAILED",
+      message: error instanceof Error ? error.message : "Failed to generate brief with the configured model.",
+      model: briefModel.model,
     });
   }
 });
@@ -374,9 +566,10 @@ agent.post("/brief-stream", async (c) => {
 
   const stream = new ReadableStream<Uint8Array>({
     start: async (controller) => {
-      const model = resolveOllamaModel(body.data.model);
-
+      let activeModel = resolveMoonshotModel(body.data.model);
       try {
+        const briefModel = await resolveBriefModel(c, body.data.model);
+        if (briefModel) activeModel = briefModel.model;
         writeEvent(controller, "understanding_request", {
           label: "Understanding request",
           detail: "Reading the user prompt and choosing the artifact shape.",
@@ -389,18 +582,26 @@ agent.post("/brief-stream", async (c) => {
           label: "Inspecting evidence",
           detail: `${body.data.evidence.length} evidence groups and ${body.data.toolInvocations.length} tool traces prepared.`,
         });
+        const designBrief = await loadTradeifyDesignBrief();
+        writeEvent(controller, "design_brief_loaded", {
+          label: "Design brief loaded",
+          detail: "Tradeify design.md is attached for brand memory, logo treatment, visual tone, and report styling rules.",
+        });
 
-        const valid = await validateOllamaModel(model);
-        if (!valid) {
+        if (!briefModel) {
           writeEvent(controller, "artifact_error", {
-            label: "Local model unavailable",
-            detail: `Ollama model ${model} is not available. Publishing deterministic artifact fallback.`,
-            model,
+            label: "Model unavailable",
+            detail: "No configured Moonshot/Kimi key or local Ollama model is available. Publishing deterministic artifact fallback.",
+            model: body.data.model,
           });
           writeEvent(controller, "artifact_created", {
             label: "Artifact created",
             detail: "Deterministic Nexus artifact is ready for review.",
-            brief: { used: false, model, message: `Ollama model ${model} is not available locally.` },
+            brief: {
+              used: false,
+              model: body.data.model,
+              message: "No configured Moonshot/Kimi key or local Ollama model is available.",
+            },
           });
           controller.close();
           return;
@@ -408,8 +609,11 @@ agent.post("/brief-stream", async (c) => {
 
         writeEvent(controller, "drafting_html_artifact", {
           label: "Drafting HTML artifact",
-          detail: `Gemma is writing the report narrative from Nexus evidence.`,
-          model,
+          detail:
+            briefModel.provider === "moonshot"
+              ? `${briefModel.model} is writing the report narrative from Nexus evidence.`
+              : "Gemma is writing the report narrative from Nexus evidence.",
+          model: briefModel.model,
         });
 
         const evidence = body.data.evidence
@@ -463,11 +667,15 @@ ${toolTrace || "- No tool trace supplied."}
 Artifact section skeleton:
 ${sectionSkeleton || "- Use the existing Nexus report structure."}
 
+Design brief the agent must remember:
+${designBrief}
+
 Rules:
 - Create the artifact. Do not ask clarifying questions.
 - Keep all numerical claims exactly as supplied by evidence or tool trace.
 - citationIds and sourceIds must be selected only from the allowed evidence IDs above.
 - If a useful idea has no evidence ID, set assumption to true and leave citationIds empty.
+- Use the design brief for tone and HTML presentation intent, but do not invent Tradeify operating metrics or competitor facts.
 - Do not mention task, board, owner, or roadmap changes as already applied.
 - Return only JSON with this shape:
 {
@@ -484,10 +692,10 @@ Rules:
   "sectionNarratives": [
     { "sectionTitle": "Cover", "body": "section narrative", "takeaways": ["optional bullets"] }
   ],
-  "modelNotes": "short note that Gemma 4 wrote narrative from deterministic Nexus evidence"
-}`;
+	  "modelNotes": "short note that the configured model wrote narrative from deterministic Nexus evidence"
+	}`;
 
-        const parsed = await createStructuredBrief({ model, user });
+        const parsed = await createStructuredBrief({ ...briefModel, user });
         writeEvent(controller, "auditing_artifact", {
           label: "Auditing artifact",
           detail: "Checking evidence coverage, actionability, and publish readiness.",
@@ -497,25 +705,25 @@ Rules:
           detail: "The HTML artifact is ready for review.",
           brief: {
             used: true,
-            provider: "ollama",
-            model,
+            provider: briefModel.provider,
+            model: briefModel.model,
             ...normalizeBriefResponse(parsed),
           },
         });
       } catch (error) {
-        console.error("Agent Ollama brief stream error:", error);
+        console.error("Agent model brief stream error:", error);
         writeEvent(controller, "artifact_error", {
-          label: "Gemma draft failed",
-          detail: error instanceof Error ? error.message : "Failed to generate brief with Ollama.",
-          model: resolveOllamaModel(body.data.model),
+          label: "Model draft failed",
+          detail: error instanceof Error ? error.message : "Failed to generate brief with the configured model.",
+          model: activeModel,
         });
         writeEvent(controller, "artifact_created", {
           label: "Artifact created",
           detail: "Deterministic Nexus artifact is ready for review.",
           brief: {
             used: false,
-            model: resolveOllamaModel(body.data.model),
-            message: error instanceof Error ? error.message : "Failed to generate brief with Ollama.",
+            model: activeModel,
+            message: error instanceof Error ? error.message : "Failed to generate brief with the configured model.",
           },
         });
       } finally {

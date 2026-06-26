@@ -2,15 +2,12 @@ import { useMemo, useState, type ChangeEvent } from "react";
 import {
   BarChart3,
   CheckCircle2,
-  ClipboardCheck,
   Database,
-  RefreshCw,
-  Send,
   Sparkles,
   Table2,
-  TriangleAlert,
   Upload,
   ArrowUpRight,
+  BookOpen,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -23,7 +20,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -31,26 +27,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { PersonAvatar } from "@/components/ui/person-avatar";
 import { domainLabel } from "@/lib/agents/runtime";
+import {
+  knowledgePacks,
+  type KnowledgePackId,
+} from "@/lib/agents/knowledge-packs";
 import { briefStyleLabel } from "@/lib/artifacts/brief-loop";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import type {
   AgentDomainId,
-  AgentActionProposal,
   ArtifactBlock,
   ArtifactSection,
   ArtifactChart,
   ArtifactTable,
-  AuditResult,
   DatasetSemanticRole,
   DraftArtifact,
   EvidenceSource,
   ProjectDataset,
-  ProposedTask,
   WorkRun,
 } from "@/types";
 
@@ -113,47 +108,6 @@ function WorkRunList({
   );
 }
 
-function NewBriefForm({
-  onCreate,
-}: {
-  onCreate: (prompt: string) => Promise<void>;
-}) {
-  const [prompt, setPrompt] = useState(
-    "Create a research memo for this project with evidence, source-backed findings, recommendations, and tasks the agent can propose after review.",
-  );
-  const [isCreating, setIsCreating] = useState(false);
-
-  const submit = async () => {
-    if (!prompt.trim()) return;
-    setIsCreating(true);
-    await onCreate(prompt.trim());
-    setIsCreating(false);
-  };
-
-  return (
-    <Card className="rounded-md" size="sm">
-      <CardHeader>
-        <CardTitle>Start a brief</CardTitle>
-        <CardDescription>
-          The agent chooses research memo, ops report, or market dossier from the prompt.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          className="min-h-28 resize-none"
-          placeholder="Ask for a research memo, internal ops report, or competitive dossier."
-        />
-        <Button onClick={() => void submit()} disabled={isCreating || !prompt.trim()}>
-          <Sparkles data-icon="inline-start" />
-          Create artifact
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
 const domainOptions: Array<{ id: AgentDomainId; label: string }> = [
   { id: "prop_firm", label: "Prop firm" },
   { id: "commerce", label: "Commerce" },
@@ -177,6 +131,7 @@ const semanticRoles: DatasetSemanticRole[] = [
   "channel",
   "author",
   "engagement",
+  "score",
   "priority",
   "owner",
 ];
@@ -184,12 +139,14 @@ const semanticRoles: DatasetSemanticRole[] = [
 function DatasetPanel({
   datasets,
   projectId,
+  onAddKnowledgePack,
   onAddSample,
   onImportCsv,
   onRoleChange,
 }: {
   datasets: ProjectDataset[];
   projectId?: string | null;
+  onAddKnowledgePack: (packId: KnowledgePackId) => void;
   onAddSample: (domainId: AgentDomainId) => void;
   onImportCsv: (
     projectId: string,
@@ -218,15 +175,49 @@ function DatasetPanel({
       <CardHeader>
         <CardTitle>Data sources</CardTitle>
         <CardDescription>
-          Use sample packs or import CSV data. The agent reads these before drafting.
+          Add public-source knowledge packs or import CSV data. The agent reads these before drafting.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-2">
+          {knowledgePacks.map((pack) => (
+            <div key={pack.id} className="rounded-md border border-border bg-background p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{pack.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{pack.description}</p>
+                </div>
+                <Badge variant="secondary">{pack.rows.length} rows</Badge>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {pack.useCases.slice(0, 3).map((useCase) => (
+                  <Badge key={useCase} variant="outline" className="text-[11px]">
+                    {useCase}
+                  </Badge>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="min-w-0 truncate text-xs text-muted-foreground">
+                  {pack.sourceName}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => projectId && onAddKnowledgePack(pack.id)}
+                  disabled={!projectId}
+                >
+                  <BookOpen data-icon="inline-start" />
+                  Add
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
           {domainOptions.slice(0, 3).map((domain) => (
             <Button
               key={domain.id}
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => projectId && onAddSample(domain.id)}
               disabled={!projectId}
@@ -280,6 +271,11 @@ function DatasetPanel({
                     <p className="text-xs text-muted-foreground">
                       {dataset.rows.length} rows - {dataset.columns.length} fields
                     </p>
+                    {dataset.sourceMetadata && (
+                      <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">
+                        {dataset.sourceMetadata.sourceName}
+                      </p>
+                    )}
                   </div>
                   <Badge variant="secondary">{domainLabel(dataset.domainId)}</Badge>
                 </div>
@@ -803,208 +799,17 @@ function ArtifactReader({
   );
 }
 
-function AuditPanel({
-  run,
-  audit,
-  onImprove,
-  onApprove,
-  onSummon,
-}: {
-  run: WorkRun;
-  audit: AuditResult;
-  onImprove: () => void;
-  onApprove: () => void;
-  onSummon: () => void;
-}) {
-  const canSummon = run.plan.approved && audit.publishReady;
-
-  return (
-    <Card className="rounded-md" size="sm">
-      <CardHeader>
-        <CardTitle>Audit / required changes</CardTitle>
-        <CardDescription>{audit.stopReason}</CardDescription>
-        <CardAction>
-          <Badge variant={audit.publishReady ? "default" : "outline"}>
-            {audit.score}/100
-          </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {audit.checklist.map((check) => (
-          <div key={check.id} className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-sm">
-            <span>{check.label}</span>
-            <Badge variant={check.status === "fail" ? "destructive" : check.status === "warn" ? "outline" : "secondary"}>
-              {check.score}
-            </Badge>
-          </div>
-        ))}
-        <div className="rounded-md border border-border bg-background p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Changes needed
-          </p>
-          {audit.requiredFixes.length > 0 ? (
-            <ul className="mt-2 space-y-1 text-sm">
-              {audit.requiredFixes.map((fix) => (
-                <li key={fix} className="flex gap-2">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-                  <span>{fix}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-muted-foreground">
-              No blocking changes. The brief is ready for review and agent handoff.
-            </p>
-          )}
-        </div>
-        <Button variant="outline" onClick={onImprove} className="w-full">
-          <RefreshCw data-icon="inline-start" />
-          Improve brief
-        </Button>
-        <Button onClick={onApprove} disabled={run.plan.approved} className="w-full">
-          <ClipboardCheck data-icon="inline-start" />
-          Approve brief
-        </Button>
-        <Button onClick={onSummon} disabled={!canSummon} className="w-full">
-          <Send data-icon="inline-start" />
-          Summon agent
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ProposedTaskRow({
-  task,
-  assigneeAvatarUrl,
-}: {
-  task: ProposedTask;
-  assigneeAvatarUrl?: string;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-background p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">{task.title}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{task.reason}</p>
-        </div>
-        <Badge variant={task.priority === "high" ? "destructive" : "secondary"}>
-          {task.priority}
-        </Badge>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        {task.suggestedAssignee ? (
-          <span className="inline-flex items-center gap-1">
-            <PersonAvatar
-              name={task.suggestedAssignee}
-              avatarUrl={assigneeAvatarUrl}
-              size="sm"
-              shape="square"
-            />
-            {task.suggestedAssignee}
-          </span>
-        ) : (
-          <Badge variant="outline">Unassigned</Badge>
-        )}
-        <Badge variant="outline" className="capitalize">
-          {task.status.replace("_", " ")}
-        </Badge>
-        {task.dueDate && <span>Due {task.dueDate}</span>}
-      </div>
-    </div>
-  );
-}
-
-function ProposalPanel({
-  proposal,
-  membersByName,
-  onApprove,
-  onApply,
-  onReject,
-}: {
-  proposal?: AgentActionProposal;
-  membersByName: Map<string, { avatarUrl?: string }>;
-  onApprove: () => void;
-  onApply: () => void;
-  onReject: () => void;
-}) {
-  if (!proposal) {
-    return (
-      <Card className="rounded-md" size="sm">
-        <CardHeader>
-          <CardTitle>Agent handoff</CardTitle>
-          <CardDescription>
-            Approve a brief and summon the agent to draft tasks, owners, board status, and roadmap items.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="rounded-md" size="sm">
-      <CardHeader>
-        <CardTitle>Agent proposal</CardTitle>
-        <CardDescription>Review before applying changes to Tasks, Board, Timeline, and Roadmap.</CardDescription>
-        <CardAction>
-          <Badge variant={proposal.status === "applied" ? "default" : "secondary"}>
-            {proposal.status.replace("_", " ")}
-          </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {proposal.proposedTasks.map((task) => (
-          <ProposedTaskRow
-            key={task.id}
-            task={task}
-            assigneeAvatarUrl={
-              task.suggestedAssignee ? membersByName.get(task.suggestedAssignee)?.avatarUrl : undefined
-            }
-          />
-        ))}
-        <div className="grid grid-cols-3 gap-2">
-          <Button
-            variant="outline"
-            onClick={onReject}
-            disabled={proposal.status === "applied" || proposal.status === "rejected"}
-          >
-            Reject
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={onApprove}
-            disabled={proposal.status === "approved" || proposal.status === "applied"}
-          >
-            Approve
-          </Button>
-          <Button onClick={onApply} disabled={!["approved", "needs_review"].includes(proposal.status)}>
-            Apply
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function BriefsWorkspace() {
   const projectId = useSelectionStore((state) => state.projectId);
   const {
     workRuns,
     selectedWorkRunId,
-    actionProposals,
-    teamMembers,
     datasets,
-    createArtifactRunFromPromptStream,
+    addKnowledgePackDataset,
     addSampleDataset,
     importCsvDataset,
     updateDatasetColumnRole,
     selectWorkRun,
-    approveWorkRunPlan,
-    createDraftForRun,
-    createActionProposalForRun,
-    approveActionProposal,
-    rejectActionProposal,
-    applyActionProposal,
   } = useDataStore();
 
   const projectRuns = useMemo(
@@ -1023,30 +828,15 @@ export function BriefsWorkspace() {
     [projectRuns, selectedWorkRunId, workRuns],
   );
   const draft = selectedRun ? latestDraft(selectedRun) : undefined;
-  const proposal = selectedRun
-    ? actionProposals.find((item) => item.runId === selectedRun.id && item.status !== "rejected")
-    : undefined;
-  const membersByName = useMemo(
-    () =>
-      new Map(
-        teamMembers
-          .filter((member) => member.projectId === projectId)
-          .map((member) => [member.name, { avatarUrl: member.avatarUrl }]),
-      ),
-    [projectId, teamMembers],
-  );
-
-  const createRun = async (prompt: string) => {
-    await createArtifactRunFromPromptStream(prompt, projectId ?? undefined);
-  };
-
   if (!selectedRun || !draft) {
     return (
-      <div className="grid h-full gap-4 bg-shell p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <NewBriefForm onCreate={createRun} />
+      <div className="grid h-full gap-4 bg-shell p-6 lg:grid-cols-[minmax(0,420px)]">
         <DatasetPanel
           datasets={projectDatasets}
           projectId={projectId}
+          onAddKnowledgePack={(packId) => {
+            if (projectId) addKnowledgePackDataset(projectId, packId);
+          }}
           onAddSample={(domainId) => {
             if (projectId) addSampleDataset(projectId, domainId);
           }}
@@ -1060,44 +850,11 @@ export function BriefsWorkspace() {
   return (
     <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-shell xl:grid-cols-[260px_minmax(0,1fr)]">
       <WorkRunList runs={projectRuns} selectedId={selectedRun.id} onSelect={selectWorkRun} />
-      <div className="grid min-h-0 grid-cols-1 overflow-hidden 2xl:grid-cols-[minmax(0,1fr)_340px]">
-        <ScrollArea className="min-h-0">
-          <div className="p-5">
-            <ArtifactReader run={selectedRun} draft={draft} />
-          </div>
-        </ScrollArea>
-        <aside className="min-h-0 border-t border-border bg-pane 2xl:border-l 2xl:border-t-0">
-          <ScrollArea className="h-full">
-            <div className="space-y-4 p-4">
-              <NewBriefForm onCreate={createRun} />
-              <DatasetPanel
-                datasets={projectDatasets}
-                projectId={projectId}
-                onAddSample={(domainId) => {
-                  if (projectId) addSampleDataset(projectId, domainId);
-                }}
-                onImportCsv={importCsvDataset}
-                onRoleChange={updateDatasetColumnRole}
-              />
-              <Separator />
-              <AuditPanel
-                run={selectedRun}
-                audit={selectedRun.audit}
-                onImprove={() => createDraftForRun(selectedRun.id)}
-                onApprove={() => approveWorkRunPlan(selectedRun.id)}
-                onSummon={() => createActionProposalForRun(selectedRun.id)}
-              />
-              <ProposalPanel
-                proposal={proposal}
-                membersByName={membersByName}
-                onApprove={() => proposal && approveActionProposal(proposal.id)}
-                onReject={() => proposal && rejectActionProposal(proposal.id)}
-                onApply={() => proposal && applyActionProposal(proposal.id)}
-              />
-            </div>
-          </ScrollArea>
-        </aside>
-      </div>
+      <ScrollArea className="min-h-0">
+        <div className="p-5">
+          <ArtifactReader run={selectedRun} draft={draft} />
+        </div>
+      </ScrollArea>
     </div>
   );
 }

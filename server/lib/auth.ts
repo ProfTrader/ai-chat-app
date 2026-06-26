@@ -123,7 +123,7 @@ export async function resolveMoonshotApiKey(c: Context): Promise<string | null> 
 }
 
 export function resolveMoonshotModel(model?: string | null): string {
-  return model ?? process.env.MOONSHOT_MODEL ?? process.env.KIMI_MODEL ?? "kimi-k2.6";
+  return model ?? process.env.MOONSHOT_MODEL ?? process.env.KIMI_MODEL ?? "kimi-k2.7";
 }
 
 export function resolveMoonshotBaseUrl(): string {

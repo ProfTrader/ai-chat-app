@@ -247,6 +247,7 @@ function inferSemanticRole(key: string, type: DatasetColumnType, domainId: Agent
   if (/(channel|network|platform)/.test(label)) return "channel";
   if (/(author|ceo|brand|handle)/.test(label)) return "author";
   if (/(engagement|likes|comments|shares|views|clicks|impressions)/.test(label)) return "engagement";
+  if (/(score|risk|effort|relevance)/.test(label)) return "score";
   if (/(owner|assignee)/.test(label)) return "owner";
   if (type === "date") return "date";
   return undefined;
@@ -357,6 +358,62 @@ export function createDatasetFromCsv({
   };
 }
 
+function createPropFirmRows(): DataRow[] {
+  const stages = ["Evaluation", "Sim funded", "Live funded", "Paused"];
+  const cohorts = ["New trader", "Passed evaluation", "Scaled trader", "Risk watch"];
+  const plans = ["25K", "50K", "100K", "150K"];
+  const opsOwners = ["Alex", "Jordan", "Maya", "Priya", "Sam", "Taylor", "Riley", "Morgan"];
+  const deskTeams = ["Onboarding", "Risk", "Payouts", "Support", "Compliance"];
+
+  return Array.from({ length: 1000 }, (_, index) => {
+    const day = (index % 60) + 1;
+    const date = new Date(Date.UTC(2026, 4, day));
+    const stage = stages[index % stages.length];
+    const plan = plans[index % plans.length];
+    const baseRevenue =
+      plan === "150K" ? 420 : plan === "100K" ? 310 : plan === "50K" ? 190 : 115;
+    const stageMultiplier =
+      stage === "Live funded" ? 1.75 : stage === "Sim funded" ? 1.15 : stage === "Paused" ? 0.35 : 0.9;
+    const activeAccounts = stage === "Paused" ? 0 : 1;
+    const workerOverhead = 34 + (index % 9) * 4 + (stage === "Live funded" ? 18 : 0);
+    const grossRevenue = Math.round((baseRevenue * stageMultiplier + (index % 13) * 11) * 100) / 100;
+    const payout = stage === "Live funded" && index % 4 !== 0 ? Math.round((grossRevenue * (0.28 + (index % 5) * 0.03)) * 100) / 100 : 0;
+    const traderSegment = cohorts[index % cohorts.length];
+    const breachCount = stage === "Evaluation" ? index % 4 : traderSegment === "Risk watch" ? 2 : index % 11 === 0 ? 1 : 0;
+    const supportTickets = index % 6 === 0 ? 3 : index % 4 === 0 ? 2 : index % 3 === 0 ? 1 : 0;
+    const complianceReviews = stage === "Live funded" && payout > 0 ? 1 : breachCount > 1 ? 1 : 0;
+    const profit = Math.round((grossRevenue - payout - workerOverhead - complianceReviews * 22) * 100) / 100;
+
+    return {
+      date: date.toISOString().slice(0, 10),
+      account_id: `PF-${String(index + 1).padStart(5, "0")}`,
+      trader_segment: traderSegment,
+      account_stage: stage,
+      plan_size: plan,
+      ops_owner: opsOwners[index % opsOwners.length],
+      desk_team: deskTeams[index % deskTeams.length],
+      active_accounts: activeAccounts,
+      daily_revenue: grossRevenue,
+      payout,
+      worker_overhead_cost: workerOverhead,
+      compliance_review_cost: complianceReviews * 22,
+      profit,
+      breach_count: breachCount,
+      support_tickets: supportTickets,
+      kpi_response_minutes: 18 + (index % 10) * 7 + supportTickets * 9,
+      kpi_review_quality: 72 + (index % 20) + (complianceReviews ? 3 : 0),
+      payout_requested: payout > 0 ? 1 : 0,
+      risk_status: breachCount > 1 ? "risk_watch" : payout > 0 ? "payout_review" : "normal",
+      operator_note:
+        breachCount > 1
+          ? "Needs risk desk follow-up before scaling."
+          : payout > 0
+            ? "Payout request requires compliance and profitability review."
+            : "Standard account monitoring.",
+    };
+  });
+}
+
 export function createSampleDataset(projectId: string, domainId: AgentDomainId): ProjectDataset {
   const timestamp = now();
   const rowsByDomain: Record<AgentDomainId, DataRow[]> = {
@@ -365,14 +422,7 @@ export function createSampleDataset(projectId: string, domainId: AgentDomainId):
       { date: "2026-06-02", status: "in_progress", owner: "Jordan", priority: "medium", effort: 4 },
       { date: "2026-06-03", status: "done", owner: "Sam", priority: "high", effort: 5 },
     ],
-    prop_firm: [
-      { date: "2026-06-01", account_stage: "Evaluation", revenue: 12800, payout: 0, profit: 8900, breaches: 9, cohort: "New trader" },
-      { date: "2026-06-02", account_stage: "Evaluation", revenue: 14100, payout: 0, profit: 9300, breaches: 7, cohort: "New trader" },
-      { date: "2026-06-03", account_stage: "Sim funded", revenue: 6200, payout: 2300, profit: 3100, breaches: 3, cohort: "Passed evaluation" },
-      { date: "2026-06-04", account_stage: "Sim funded", revenue: 7100, payout: 3100, profit: 2800, breaches: 2, cohort: "Passed evaluation" },
-      { date: "2026-06-05", account_stage: "Live funded", revenue: 9400, payout: 4800, profit: 3600, breaches: 1, cohort: "Scaled trader" },
-      { date: "2026-06-06", account_stage: "Live funded", revenue: 10100, payout: 5200, profit: 3900, breaches: 1, cohort: "Scaled trader" },
-    ],
+    prop_firm: createPropFirmRows(),
     commerce: [
       { date: "2026-06-01", product: "Starter plan", category: "Subscription", sales: 9200, orders: 42, discount: 0, margin: 0.71 },
       { date: "2026-06-02", product: "Starter plan", category: "Subscription", sales: 11100, orders: 50, discount: 10, margin: 0.66 },
@@ -396,7 +446,28 @@ export function createSampleDataset(projectId: string, domainId: AgentDomainId):
       ? { margin: "profit" as const, orders: "sales" as const }
       : domainId === "social"
         ? { impressions: "engagement" as const, theme: "category" as const, posts: "sales" as const }
-        : {};
+        : domainId === "prop_firm"
+          ? {
+              date: "date" as const,
+              account_id: "entity" as const,
+              trader_segment: "category" as const,
+              account_stage: "account_stage" as const,
+              plan_size: "product" as const,
+              ops_owner: "owner" as const,
+              desk_team: "channel" as const,
+              daily_revenue: "revenue" as const,
+              payout: "payout" as const,
+              worker_overhead_cost: "discount" as const,
+              compliance_review_cost: "discount" as const,
+              profit: "profit" as const,
+              breach_count: "status" as const,
+              support_tickets: "engagement" as const,
+              kpi_response_minutes: "engagement" as const,
+              kpi_review_quality: "score" as const,
+              payout_requested: "payout" as const,
+              risk_status: "status" as const,
+            }
+          : {};
 
   return {
     id: id("dataset"),
@@ -473,6 +544,27 @@ function workspaceTaskSummary(dataset: ProjectDataset) {
   };
 }
 
+function representativeTextSnippets(dataset: ProjectDataset) {
+  const textColumns = dataset.columns.filter(
+    (column) =>
+      column.type === "string" &&
+      /(issue|summary|reply|note|headline|complaint|description|recommended|brief)/i.test(column.key),
+  );
+  if (textColumns.length === 0) return "";
+
+  return dataset.rows
+    .slice(0, 5)
+    .map((row, index) => {
+      const snippets = textColumns
+        .slice(0, 2)
+        .map((column) => stringValue(row[column.key]))
+        .filter((value) => value && value !== "Unspecified");
+      return snippets.length ? `Row ${index + 1}: ${snippets.join(" / ")}` : "";
+    })
+    .filter(Boolean)
+    .join(" | ");
+}
+
 function roleColumn(dataset: ProjectDataset, roles: DatasetSemanticRole[], fallbackType?: DatasetColumnType) {
   return (
     dataset.columns.find((column) => column.semanticRole && roles.includes(column.semanticRole)) ??
@@ -518,7 +610,7 @@ function profileMetrics(dataset: ProjectDataset): ProfileResult {
 
 function compareSegments(dataset: ProjectDataset): SegmentResult[] {
   const segment = roleColumn(dataset, ["account_stage", "category", "product", "author", "channel", "status"], "string");
-  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement", "payout"], "number");
+  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement", "payout", "score"], "number");
   if (!segment || !measure) return [];
 
   const groups = new Map<string, { count: number; total: number }>();
@@ -543,7 +635,7 @@ function compareSegments(dataset: ProjectDataset): SegmentResult[] {
 
 function trendAnalysis(dataset: ProjectDataset): TrendResult[] {
   const date = roleColumn(dataset, ["date"], "date");
-  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement", "payout"], "number");
+  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement", "payout", "score"], "number");
   if (!date || !measure) return [];
 
   const groups = new Map<string, number>();
@@ -561,7 +653,7 @@ function trendAnalysis(dataset: ProjectDataset): TrendResult[] {
 
 function effectivenessAnalysis(dataset: ProjectDataset) {
   const exposure = roleColumn(dataset, ["discount", "payout"], "number");
-  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement"], "number");
+  const measure = roleColumn(dataset, ["profit", "revenue", "sales", "engagement", "score"], "number");
   if (!exposure || !measure) return null;
 
   const exposed = dataset.rows.filter((row) => numberValue(row[exposure.key]) > 0);
@@ -633,12 +725,54 @@ function classifyDomain(prompt: string): AgentDomainId {
   return "general";
 }
 
-function pickDataset(domainId: AgentDomainId, datasets: ProjectDataset[], tasks: Task[], projectId: string) {
+function datasetSourceLabel(dataset: ProjectDataset) {
+  if (!dataset.sourceMetadata) return dataset.name;
+  return `${dataset.name} - ${dataset.sourceMetadata.sourceName} (${dataset.sourceMetadata.sourceUrl})`;
+}
+
+function knowledgePackScore(dataset: ProjectDataset, prompt: string) {
+  const input = prompt.toLowerCase();
+  const haystack = [
+    dataset.name,
+    dataset.sourceMetadata?.packId,
+    dataset.sourceMetadata?.label,
+    dataset.sourceMetadata?.sourceName,
+    ...(dataset.sourceMetadata?.useCases ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  let score = 0;
+  if (/(bank|banking|kyc|entitlement|account|churn|complaint|compliance|customer ops)/.test(input)) {
+    if (/(bank|kyc|entitlement|churn|account|customer ops)/.test(haystack)) score += 10;
+  }
+  if (/(sentiment|headline|market|news|regulatory|compliance|dossier)/.test(input)) {
+    if (/(sentiment|headline|news|phrasebank|market|regulatory)/.test(haystack)) score += 10;
+  }
+  if (/(support|ticket|sla|workforce|internal|employee|queue|owner)/.test(input)) {
+    if (/(support|ticket|workforce|sla|queue)/.test(haystack)) score += 10;
+  }
+  if (dataset.sourceMetadata?.kind === "knowledge_pack") score += 2;
+  return score;
+}
+
+function pickDataset(
+  domainId: AgentDomainId,
+  datasets: ProjectDataset[],
+  tasks: Task[],
+  projectId: string,
+  prompt: string,
+) {
   if (domainId === "general") {
-    return datasets.find((dataset) => dataset.domainId === "general") ?? createWorkspaceDataset(projectId, tasks);
+    const generalDatasets = datasets.filter((dataset) => dataset.domainId === "general");
+    const scored = generalDatasets
+      .map((dataset) => ({ dataset, score: knowledgePackScore(dataset, prompt) }))
+      .sort((left, right) => right.score - left.score);
+    return scored[0]?.dataset ?? createWorkspaceDataset(projectId, tasks);
   }
 
-  return datasets.find((dataset) => dataset.domainId === domainId) ?? createWorkspaceDataset(projectId, tasks);
+  return datasets.find((dataset) => dataset.domainId === domainId) ?? createSampleDataset(projectId, domainId);
 }
 
 function buildMetrics(profile: ProfileResult, dataset: ProjectDataset): MetricDefinition[] {
@@ -949,6 +1083,9 @@ function buildStructuredSections({
     month: "short",
     day: "numeric",
   });
+  const sourceMeta = dataset.sourceMetadata
+    ? `Knowledge pack - ${dataset.sourceMetadata.sourceName}`
+    : dataset.sourceKind.toUpperCase();
 
   return [
     {
@@ -967,7 +1104,7 @@ function buildStructuredSections({
             { label: "Dataset", value: dataset.name },
             { label: "Rows", value: String(profile.rowCount) },
             { label: "Trend points", value: String(trend.length) },
-            { label: "Source", value: dataset.sourceKind.toUpperCase() },
+            { label: "Source", value: sourceMeta },
           ],
         },
         {
@@ -1257,34 +1394,39 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
   const timestamp = now();
   const projectId = input.project?.id ?? "proj-1";
   const domainId = classifyDomain(input.prompt);
-  const dataset = pickDataset(domainId, input.datasets, input.tasks, projectId);
+  const dataset = pickDataset(domainId, input.datasets, input.tasks, projectId, input.prompt);
   const inspection = inspectDataset(dataset);
   const profile = profileMetrics(dataset);
   const segments = compareSegments(dataset);
   const trend = trendAnalysis(dataset);
   const effectiveness = effectivenessAnalysis(dataset);
   const taskSummary = workspaceTaskSummary(dataset);
+  const sourceLabel = datasetSourceLabel(dataset);
+  const sourceNotes = dataset.sourceMetadata
+    ? ` Public-source pack: ${dataset.sourceMetadata.sourceName}. ${dataset.sourceMetadata.notes ?? ""}`.trim()
+    : "";
+  const textSnippets = representativeTextSnippets(dataset);
 
   const toolResults = [
     toolResult(
       "inspect_dataset",
-      dataset.name,
+      sourceLabel,
       taskSummary
         ? `${taskSummary.statusLine} Current task evidence: ${taskSummary.focusLine || "No open tasks listed."}`
-        : `${inspection.rowCount} rows, ${inspection.columns.length} columns, ${inspection.dateColumns.length} date fields, ${inspection.entityColumns.length} entity fields.`,
+        : `${inspection.rowCount} rows, ${inspection.columns.length} columns, ${inspection.dateColumns.length} date fields, ${inspection.entityColumns.length} entity fields.${sourceNotes ? ` ${sourceNotes}` : ""}`,
       0,
     ),
     toolResult(
       "profile_metrics",
-      dataset.name,
+      sourceLabel,
       taskSummary
         ? `Task profile: ${taskSummary.highPriority.length} high-priority, ${taskSummary.researchTasks.length} research/finding-related, ${taskSummary.openTasks.length} still open.`
-        : `${profile.numericTotals.length} numeric metrics, ${profile.categoryCounts.length} segment buckets, ${profile.missing.length} missing-data warnings.`,
+        : `${profile.numericTotals.length} numeric metrics, ${profile.categoryCounts.length} segment buckets, ${profile.missing.length} missing-data warnings.${textSnippets ? ` Representative text: ${textSnippets}` : ""}`,
       1,
     ),
     toolResult(
       "compare_segments",
-      dataset.name,
+      sourceLabel,
       taskSummary
         ? `Active focus: ${(taskSummary.inProgress.length > 0 ? taskSummary.inProgress : taskSummary.openTasks.slice(0, 2)).map(formatTaskReference).join("; ") || "No active focus task found."}`
         : segments.length > 0
@@ -1294,7 +1436,7 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
     ),
     toolResult(
       "trend_analysis",
-      dataset.name,
+      sourceLabel,
       taskSummary
         ? `Next queue: ${taskSummary.todo.slice(0, 4).map(formatTaskReference).join("; ") || "No todo queue found."}`
         : trend.length > 0
@@ -1304,7 +1446,7 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
     ),
     toolResult(
       "effectiveness_analysis",
-      dataset.name,
+      sourceLabel,
       taskSummary
         ? `Evidence gap read: ${taskSummary.researchTasks.length > 0 ? taskSummary.researchTasks.map(formatTaskReference).join("; ") : "No explicit research or findings task is present; mark this as a gap."}`
         : effectiveness
@@ -1334,10 +1476,18 @@ export function runBusinessIntelligenceAgent(input: AgentRuntimeInput): {
   const plan = createPlanArtifact(input.prompt, input.project);
   const preparedPlan = {
     ...plan,
-    sources: [dataset.name, "Project tasks", "Project contacts", "Recent chat context"],
+    sources: [
+      datasetSourceLabel(dataset),
+      ...(dataset.sourceMetadata?.sourceUrl ? [dataset.sourceMetadata.sourceUrl] : []),
+      "Project tasks",
+      "Project contacts",
+      "Recent chat context",
+    ],
     assumptions: [
       `Using ${domainLabels[domainId]} as the domain pack for this request.`,
-      "CSV and mock datasets are treated as workspace-approved sources in v1.",
+      dataset.sourceMetadata
+        ? `Using bundled ${dataset.sourceMetadata.label} knowledge-pack rows with public source attribution.`
+        : "CSV and mock datasets are treated as workspace-approved sources in v1.",
       "Task and board mutations require proposal review before apply.",
     ],
   };

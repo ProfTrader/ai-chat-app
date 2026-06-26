@@ -1,54 +1,23 @@
-import { useEffect, useState } from "react";
-import { Copy } from "lucide-react";
+import { ArrowUpRight, Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageFooter,
+  MessageHeader,
+} from "@/components/ui/message";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/format-relative-time";
 import { toast } from "sonner";
 import { useDataStore } from "@/stores/data-store";
 import { useShellStore } from "@/stores/shell-store";
-
-const thinkingPhrases = [
-  "Dexter is thinking through the request",
-  "Dexter is pondering the useful angle",
-  "Dexter is lining up the context",
-  "Dexter is checking the next move",
-];
-
-function AsciiSpinner({ className }: { className?: string }) {
-  const frames = ["|", "/", "-", "\\"];
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setFrame((current) => (current + 1) % frames.length);
-    }, 140);
-
-    return () => window.clearInterval(interval);
-  }, [frames.length]);
-
-  return (
-    <span aria-hidden className={cn("inline-block w-[1ch] font-mono", className)}>
-      {frames[frame]}
-    </span>
-  );
-}
-
-function ThinkingPhrase() {
-  const [phraseIndex, setPhraseIndex] = useState(0);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setPhraseIndex((current) => (current + 1) % thinkingPhrases.length);
-    }, 1800);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
-  return <span>{thinkingPhrases[phraseIndex]}</span>;
-}
 
 function getMessageText(message: UIMessage) {
   return message.parts
@@ -65,22 +34,108 @@ function parseViewBriefMarker(text: string) {
   };
 }
 
-function StreamingPlaceholder() {
+function StreamingStatus({ label }: { label: string }) {
   return (
-    <div className="flex min-w-52 flex-col gap-2 py-1">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <AsciiSpinner className="text-active" />
-        <ThinkingPhrase />
-      </div>
-      <div className="h-2 w-48 rounded-full bg-muted nexus-shimmer" />
-      <div className="h-2 w-64 max-w-full rounded-full bg-muted nexus-shimmer" />
-      <div className="h-2 w-36 rounded-full bg-muted nexus-shimmer" />
+    <Marker role="status" className="w-fit text-xs">
+      <MarkerIcon>
+        <Spinner role="presentation" aria-hidden="true" className="text-active" />
+      </MarkerIcon>
+      <MarkerContent className="shimmer">{label}</MarkerContent>
+    </Marker>
+  );
+}
+
+function renderMarkdown(content: string, key: string) {
+  if (!content.trim()) return null;
+
+  return (
+    <div
+      key={key}
+      className={cn(
+        "prose prose-sm max-w-none text-foreground",
+        "[&_a]:text-active [&_a]:underline-offset-4",
+        "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
+        "[&_h1]:mb-2 [&_h1]:mt-1 [&_h1]:text-base [&_h1]:font-semibold",
+        "[&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold",
+        "[&_h3]:mb-1.5 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-medium",
+        "[&_li]:my-1 [&_ol]:my-2 [&_p]:my-2 [&_p]:leading-7 [&_ul]:my-2",
+        "[&_strong]:font-semibold",
+      )}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
 
-function StreamingCursor() {
-  return <span className="ml-0.5 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-active" />;
+function parseProductionStream(content: string) {
+  const heading = "## HTML production stream";
+  const headingIndex = content.indexOf(heading);
+  if (headingIndex === -1) return null;
+
+  const before = content.slice(0, headingIndex).trim();
+  const afterHeading = content.slice(headingIndex + heading.length).trim();
+  const createdIndex = afterHeading.search(/\nCreated \*\*/);
+  const streamText = createdIndex === -1 ? afterHeading : afterHeading.slice(0, createdIndex).trim();
+  const after = createdIndex === -1 ? "" : afterHeading.slice(createdIndex).trim();
+  const lines = streamText.split("\n").map((line) => line.trim()).filter(Boolean);
+  const currentLine = lines.find((line) => line.startsWith("**Current:**"));
+  const current = currentLine?.replace(/^\*\*Current:\*\*\s*/, "").trim();
+  const completed = lines
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.replace(/^- /, "").trim())
+    .filter(Boolean);
+
+  return { before, current, completed, after };
+}
+
+function ProductionStream({
+  content,
+  isStreaming,
+}: {
+  content: string;
+  isStreaming?: boolean;
+}) {
+  const stream = parseProductionStream(content);
+  if (!stream) return renderMarkdown(content, "markdown");
+  const isActive = Boolean(stream.current && !stream.after) || Boolean(isStreaming && stream.current);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {renderMarkdown(stream.before, "before-stream")}
+      <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+        <div className="text-xs font-medium text-muted-foreground">HTML production stream</div>
+        {stream.current ? (
+          <Marker role="status" className="text-sm">
+            <MarkerIcon>
+              {isActive ? (
+                <Spinner role="presentation" aria-hidden="true" className="text-active" />
+              ) : (
+                <Check className="text-active" />
+              )}
+            </MarkerIcon>
+            <MarkerContent className={cn(isActive && "shimmer")}>
+              {stream.current}
+            </MarkerContent>
+          </Marker>
+        ) : null}
+        {stream.completed.length > 0 ? (
+          <div className="flex flex-col gap-1.5 pt-1">
+            {stream.completed.map((item, index) => (
+              <Marker key={`${item}-${index}`} className="text-xs">
+                <MarkerIcon>
+                  <Check className="text-active" />
+                </MarkerIcon>
+                <MarkerContent>{item}</MarkerContent>
+              </Marker>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {renderMarkdown(stream.after, "after-stream")}
+    </div>
+  );
 }
 
 interface ChatMessageProps {
@@ -92,7 +147,6 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const isUser = message.role === "user";
   const text = getMessageText(message);
   const { runId, cleanText } = parseViewBriefMarker(text);
-  const timestamp = formatRelativeTime(new Date().toISOString());
   const selectWorkRun = useDataStore((state) => state.selectWorkRun);
   const setActiveView = useShellStore((state) => state.setActiveView);
 
@@ -108,73 +162,81 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   };
 
   return (
-    <div
-      className={cn(
-        "group flex w-full flex-col gap-1.5",
-        isUser ? "items-end" : "items-start",
-      )}
-    >
-      <div
+    <Message align={isUser ? "end" : "start"} className="items-end">
+      <MessageAvatar
         className={cn(
-          "flex items-center gap-2 px-1 text-xs text-muted-foreground",
-          isUser && "flex-row-reverse",
+          "bg-transparent",
+          isUser ? "opacity-80" : "opacity-100",
         )}
       >
-        <span className="font-medium">{isUser ? "You" : "Assistant"}</span>
-        <span>{timestamp}</span>
-        {!isUser && cleanText && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={() => void handleCopy()}
-          >
-            <Copy />
-          </Button>
+        <Avatar size="sm" className={isUser ? "bg-muted" : "bg-primary/10"}>
+          <AvatarFallback className={cn(isUser ? "bg-muted" : "bg-primary/10 text-active")}>
+            {isUser ? "Y" : "DX"}
+          </AvatarFallback>
+        </Avatar>
+      </MessageAvatar>
+      <MessageContent
+        className={cn(
+          "max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5",
+          isUser ? "items-end" : "items-start",
         )}
-      </div>
+      >
+        <MessageHeader className={cn("px-1", isUser && "justify-end")}>
+          <span>{isUser ? "You" : "Dexter"}</span>
+        </MessageHeader>
 
-      <div
-        className={cn(
-          "max-w-[88%] text-sm leading-relaxed",
-          isUser
-            ? "rounded-2xl bg-muted px-4 py-2.5 text-foreground"
-            : "px-1 py-1 text-foreground",
-        )}
-      >
         {isStreaming && !text ? (
-          <StreamingPlaceholder />
+          <StreamingStatus label="Dexter is thinking..." />
         ) : isUser ? (
-          cleanText
+          <Bubble align="end" variant="default" className="max-w-full">
+            <BubbleContent className="px-3.5 py-2.5">{cleanText}</BubbleContent>
+          </Bubble>
         ) : (
-          <div className="flex flex-col gap-3">
-            {message.parts.map((part, index) => {
-              if (part.type === "text") {
-                return (
-                  <div
-                    key={`${part.type}-${index}`}
-                    className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2"
-                  >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {parseViewBriefMarker(part.text).cleanText}
-                    </ReactMarkdown>
-                  </div>
-                );
-              }
+          <Bubble variant="ghost" className="max-w-full">
+            <BubbleContent className="flex flex-col gap-2.5 text-foreground">
+              {message.parts.map((part, index) => {
+                if (part.type !== "text") return null;
 
-              return null;
-            })}
-            {runId && (
-              <div>
-                <Button size="sm" onClick={viewBrief}>
-                  View brief
-                </Button>
-              </div>
-            )}
-            {isStreaming && text && <StreamingCursor />}
-          </div>
+                const partText = parseViewBriefMarker(part.text).cleanText;
+                if (!partText) return null;
+
+                return (
+                  <ProductionStream
+                    key={`${part.type}-${index}`}
+                    content={partText}
+                    isStreaming={isStreaming}
+                  />
+                );
+              })}
+            </BubbleContent>
+          </Bubble>
         )}
-      </div>
-    </div>
+
+        {(!isUser && (cleanText || runId || (isStreaming && text))) && (
+          <MessageFooter className="gap-1 px-1">
+            {isStreaming && text ? (
+              <StreamingStatus label="Calling Moonshot..." />
+            ) : null}
+            {runId ? (
+              <Button size="sm" variant="outline" onClick={viewBrief}>
+                View brief
+                <ArrowUpRight data-icon="inline-end" />
+              </Button>
+            ) : null}
+            {cleanText ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
+                onClick={() => void handleCopy()}
+                aria-label="Copy message"
+              >
+                <Copy />
+              </Button>
+            ) : null}
+          </MessageFooter>
+        )}
+      </MessageContent>
+    </Message>
   );
 }

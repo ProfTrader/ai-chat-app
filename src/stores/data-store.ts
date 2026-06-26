@@ -34,6 +34,10 @@ import {
   runBusinessIntelligenceAgent,
 } from "@/lib/agents/runtime";
 import {
+  createKnowledgePackDataset,
+  type KnowledgePackId,
+} from "@/lib/agents/knowledge-packs";
+import {
   applyLocalModelBrief,
   generateBriefWithLocalModel,
   streamBriefWithLocalModel,
@@ -89,6 +93,10 @@ interface DataState {
     text: string,
   ) => ProjectDataset;
   addSampleDataset: (projectId: string, domainId: AgentDomainId) => ProjectDataset;
+  addKnowledgePackDataset: (
+    projectId: string,
+    packId: KnowledgePackId,
+  ) => ProjectDataset;
   updateDatasetColumnRole: (
     datasetId: string,
     columnKey: string,
@@ -450,6 +458,13 @@ export const useDataStore = create<DataState>((set, get) => ({
     return dataset;
   },
 
+  addKnowledgePackDataset: (projectId, packId) => {
+    const dataset = createKnowledgePackDataset(projectId, packId);
+    set({ datasets: [dataset, ...get().datasets] });
+    persistLocal(get());
+    return dataset;
+  },
+
   updateDatasetColumnRole: (datasetId, columnKey, semanticRole) => {
     set({
       datasets: get().datasets.map((dataset) =>
@@ -540,7 +555,42 @@ export const useDataStore = create<DataState>((set, get) => ({
     });
 
     const brief = await streamBriefWithLocalModel({ workRun, agentRun, onEvent });
+    const emitHtmlStage = (event: ArtifactStreamEvent["event"], label: string, detail: string) => {
+      onEvent?.({
+        event,
+        at: new Date().toISOString(),
+        data: { label, detail, model: agentRun.model },
+      });
+    };
+    emitHtmlStage(
+      "html_scaffolded",
+      "HTML scaffold",
+      "Creating the standalone document shell, layout, and responsive report structure.",
+    );
+    emitHtmlStage(
+      "html_design_applied",
+      "Tradeify design applied",
+      "Applying design.md, the official Tradeify logo treatment, dark report surfaces, and green/gold data accents.",
+    );
     const generated = applyLocalModelBrief({ workRun, agentRun, brief });
+    const generatedDraft = generated.workRun.drafts[generated.workRun.drafts.length - 1];
+    emitHtmlStage(
+      "html_visuals_rendered",
+      "Visual blocks rendered",
+      `${generatedDraft?.htmlArtifact?.visualizationCount ?? 0} visual blocks and ${generatedDraft?.htmlArtifact?.tableCount ?? 0} tables were embedded in the HTML file.`,
+    );
+    emitHtmlStage(
+      "html_evidence_attached",
+      "Evidence appendix attached",
+      `${generatedDraft?.htmlArtifact?.evidenceCount ?? generated.workRun.evidence.length} evidence sources and source URLs were added to the appendix.`,
+    );
+    emitHtmlStage(
+      "html_finalized",
+      "HTML file finalized",
+      generatedDraft?.htmlArtifact?.fileName
+        ? `Final artifact file: ${generatedDraft.htmlArtifact.fileName}.`
+        : "Final artifact file is ready.",
+    );
     return get().commitArtifactRun({
       workRun: generated.workRun,
       agentRun: generated.agentRun,

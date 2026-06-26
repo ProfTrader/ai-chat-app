@@ -7,6 +7,7 @@ import type {
   WorkRun,
 } from "@/types";
 import { auditWorkRun } from "@/lib/artifacts/brief-loop";
+import { attachBriefHtmlArtifact } from "@/lib/artifacts/html-brief";
 
 interface ModelFinding {
   claim: string;
@@ -30,7 +31,7 @@ interface SectionNarrative {
 
 interface AgentBriefResponse {
   used: boolean;
-  provider?: "ollama";
+  provider?: "ollama" | "moonshot";
   model?: string;
   title?: string;
   executiveSummary?: string;
@@ -47,8 +48,14 @@ export type ArtifactStreamEventName =
   | "understanding_request"
   | "retrieving_context"
   | "inspecting_evidence"
+  | "design_brief_loaded"
   | "drafting_html_artifact"
   | "auditing_artifact"
+  | "html_scaffolded"
+  | "html_design_applied"
+  | "html_visuals_rendered"
+  | "html_evidence_attached"
+  | "html_finalized"
   | "artifact_created"
   | "artifact_error";
 
@@ -393,9 +400,9 @@ export function applyLocalModelBrief({
   agentRun: AgentRun;
   brief: AgentBriefResponse;
 }): { workRun: WorkRun; agentRun: AgentRun } {
-  if (!brief.used) return { workRun, agentRun };
+  if (!brief.used) return { workRun: attachBriefHtmlArtifact(workRun), agentRun };
   const latestDraft = workRun.drafts[workRun.drafts.length - 1];
-  if (!latestDraft) return { workRun, agentRun };
+  if (!latestDraft) return { workRun: attachBriefHtmlArtifact(workRun), agentRun };
 
   const evidenceIds = new Set(workRun.evidence.map((source) => source.id));
   const modelEvidence: EvidenceSource = {
@@ -421,12 +428,13 @@ export function applyLocalModelBrief({
     drafts: [...workRun.drafts.slice(0, -1), nextDraft],
     updatedAt: new Date().toISOString(),
   };
+  const auditedWorkRun: WorkRun = {
+    ...nextWorkRun,
+    audit: auditWorkRun(nextWorkRun),
+  };
 
   return {
-    workRun: {
-      ...nextWorkRun,
-      audit: auditWorkRun(nextWorkRun),
-    },
+    workRun: attachBriefHtmlArtifact(auditedWorkRun),
     agentRun: {
       ...agentRun,
       model: brief.model ?? agentRun.model,
