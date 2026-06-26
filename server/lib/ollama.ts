@@ -33,8 +33,21 @@ export function resolveOllamaModel(model?: string | null): string {
   return model ?? process.env.OLLAMA_MODEL ?? "hermes-gemma4:e4b";
 }
 
+function ollamaHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const apiKey = process.env.OLLAMA_API_KEY;
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+  return headers;
+}
+
 export async function listOllamaModels(baseUrl = resolveOllamaBaseUrl()) {
-  const response = await fetch(`${baseUrl}/api/tags`);
+  const response = await fetch(`${baseUrl}/api/tags`, {
+    headers: ollamaHeaders(),
+  });
   if (!response.ok) {
     const details = await response.text().catch(() => "");
     throw new Error(details || `Ollama tags request failed with status ${response.status}`);
@@ -104,9 +117,7 @@ export async function createOllamaChatStream(options: {
 
       const response = await fetch(`${options.baseUrl}/api/chat`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: ollamaHeaders(),
         body: JSON.stringify({
           model: options.model,
           stream: true,
@@ -174,9 +185,7 @@ export async function createOllamaChatCompletion(options: {
 }) {
   const response = await fetch(`${options.baseUrl}/api/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: ollamaHeaders(),
     body: JSON.stringify({
       model: options.model,
       stream: false,
