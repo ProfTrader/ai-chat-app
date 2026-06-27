@@ -10,9 +10,11 @@ import {
   Columns3,
   ContactRound,
   FileText,
+  FolderOpen,
   Inbox,
   LayoutDashboard,
   ListTodo,
+  MessageSquare,
   MoreHorizontal,
   Network,
   Pin,
@@ -52,22 +54,28 @@ import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
 import type { Project, Session, ViewType } from "@/types";
 
-const primaryViews: {
+const projectFiles: {
   value: ViewType;
   label: string;
   icon: LucideIcon;
-  count?: number;
 }[] = [
-  { value: "chat", label: "Inbox", icon: Inbox, count: 3 },
+  { value: "chat", label: "Chat", icon: MessageSquare },
   { value: "briefs", label: "Briefs", icon: FileText },
   { value: "tasks", label: "Tasks", icon: ListTodo },
   { value: "board", label: "Board", icon: Columns3 },
-  { value: "contacts", label: "Contacts", icon: ContactRound },
+  { value: "contacts", label: "Team", icon: ContactRound },
+];
+
+function isProjectFileView(view: ViewType) {
+  return projectFiles.some((file) => file.value === view);
+}
+
+const utilityViews: { value: ViewType; label: string; icon: LucideIcon }[] = [
   { value: "timeline", label: "Timeline", icon: CalendarDays },
   { value: "nodes", label: "Agent builder", icon: Network },
 ];
 
-const sharedViews: { label: string; icon: LucideIcon }[] = [
+const workspaceUtilities: { label: string; icon: LucideIcon }[] = [
   { label: "All teammates", icon: Users },
   { label: "Companies", icon: Building2 },
   { label: "Automations", icon: Bot },
@@ -125,7 +133,7 @@ function ModuleButton({
       <Icon data-icon="inline-start" />
       <span className="truncate">{label}</span>
       {count ? (
-        <Badge variant="destructive" className="ml-auto size-5 rounded-full px-0 text-[11px]">
+        <Badge variant="secondary" className="ml-auto h-5 min-w-5 rounded-full px-1.5 text-[11px] font-normal">
           {count}
         </Badge>
       ) : null}
@@ -221,31 +229,224 @@ function AccountMenu() {
   );
 }
 
-function ProjectItem({ project, isActive }: { project: Project; isActive: boolean }) {
-  const setProjectId = useSelectionStore((s) => s.setProjectId);
-
+function ProjectFileItem({
+  icon: Icon,
+  label,
+  count,
+  isActive,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  count?: number;
+  isActive?: boolean;
+  onClick: () => void;
+}) {
   return (
     <Button
       variant="ghost"
       className={cn(
-        "h-auto w-full justify-start gap-2 rounded-none border-b border-border px-3 py-3 font-normal",
-        isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/70",
+        "h-8 w-full justify-start gap-2 rounded-md px-2 text-sm font-normal",
+        isActive
+          ? "bg-active-soft text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
-      onClick={() => setProjectId(project.id)}
+      onClick={onClick}
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-background text-xs font-semibold">
-        {project.name.slice(0, 2).toUpperCase()}
+      <Icon data-icon="inline-start" />
+      <span className="truncate">{label}</span>
+      {typeof count === "number" ? (
+        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span>
+      ) : null}
+    </Button>
+  );
+}
+
+function SessionTreeRow({
+  session,
+  isActive,
+  onClick,
+}: {
+  session: Session;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      className={cn(
+        "h-8 w-full justify-start gap-2 rounded-md px-2 pl-6 text-sm font-normal",
+        isActive
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+      onClick={onClick}
+    >
+      {session.pinned ? (
+        <Pin className="size-3.5 shrink-0 text-fin" />
+      ) : (
+        <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
+      )}
+      <span className="min-w-0 flex-1 truncate text-left">{session.title}</span>
+      <span className="shrink-0 text-[11px] text-muted-foreground">
+        {formatRelativeTime(session.updatedAt)}
       </span>
-      <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-sm font-semibold text-foreground">
+    </Button>
+  );
+}
+
+function SessionCategory({
+  label,
+  sessions,
+  activeSessionId,
+  activeView,
+  onSelect,
+}: {
+  label: string;
+  sessions: Session[];
+  activeSessionId: string | null;
+  activeView: ViewType;
+  onSelect: (session: Session) => void;
+}) {
+  if (sessions.length === 0) return null;
+
+  return (
+    <div className="space-y-0.5">
+      <div className="px-2 pb-0.5 pl-6 pt-1.5 text-[11px] font-medium text-muted-foreground">
+        {label}
+      </div>
+      {sessions.map((session) => (
+        <SessionTreeRow
+          key={session.id}
+          session={session}
+          isActive={session.id === activeSessionId && activeView === "chat"}
+          onClick={() => onSelect(session)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProjectTreeItem({
+  project,
+  isActive,
+  sessions,
+  activeSessionId,
+  activeView,
+  counts,
+}: {
+  project: Project;
+  isActive: boolean;
+  sessions: Session[];
+  activeSessionId: string | null;
+  activeView: ViewType;
+  counts: Partial<Record<ViewType, number>>;
+}) {
+  const { setProjectId, setSessionId } = useSelectionStore();
+  const { setActiveView, setSidebarMode } = useShellStore();
+
+  const firstSession = sessions[0];
+  const pinnedSessions = sessions.filter((session) => session.pinned);
+  const recentSessions = sessions.filter((session) => !session.pinned);
+  const selectSession = (session: Session) => {
+    setProjectId(session.projectId);
+    setSessionId(session.id);
+    setActiveView("chat");
+    setSidebarMode("projects");
+  };
+  const openProject = () => {
+    setProjectId(project.id);
+    setSidebarMode("projects");
+    const shouldOpenChat = !isProjectFileView(activeView);
+    if (shouldOpenChat) {
+      setActiveView("chat");
+    }
+    if ((activeView === "chat" || shouldOpenChat) && !sessions.some((session) => session.id === activeSessionId)) {
+      setSessionId(firstSession?.id ?? null);
+    }
+  };
+
+  const openFile = (view: ViewType) => {
+    setProjectId(project.id);
+    setSidebarMode("projects");
+    setActiveView(view);
+    if (view === "chat") {
+      setSessionId(
+        sessions.some((session) => session.id === activeSessionId)
+          ? activeSessionId
+          : firstSession?.id ?? null,
+      );
+    }
+  };
+
+  return (
+    <div className="py-1">
+      <Button
+        variant="ghost"
+        className={cn(
+          "h-8 w-full justify-start gap-2 rounded-md px-2 font-normal",
+          isActive ? "bg-muted/70 text-foreground" : "text-muted-foreground hover:bg-muted/70",
+        )}
+        onClick={openProject}
+      >
+        {isActive ? (
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <FolderOpen className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
           {project.name}
         </span>
-        <span className="block truncate text-xs text-muted-foreground">
-          Shared project
-        </span>
-      </span>
-      <ChevronRight data-icon="inline-end" />
-    </Button>
+      </Button>
+
+      {isActive ? (
+        <div className="ml-4 mt-1 space-y-0.5 border-l border-border/70 pl-2">
+          <ProjectFileItem
+            icon={MessageSquare}
+            label="Chat"
+            count={counts.chat}
+            isActive={activeView === "chat"}
+            onClick={() => openFile("chat")}
+          />
+          {sessions.length === 0 ? (
+            <div className="rounded-md px-2 py-1.5 pl-6 text-xs text-muted-foreground">
+              No chat threads yet.
+            </div>
+          ) : (
+            <div className="mb-1 space-y-0.5">
+              <SessionCategory
+                label="Pinned"
+                sessions={pinnedSessions}
+                activeSessionId={activeSessionId}
+                activeView={activeView}
+                onSelect={selectSession}
+              />
+              <SessionCategory
+                label={pinnedSessions.length > 0 ? "Recent" : "Sessions"}
+                sessions={recentSessions}
+                activeSessionId={activeSessionId}
+                activeView={activeView}
+                onSelect={selectSession}
+              />
+            </div>
+          )}
+
+          {projectFiles
+            .filter((file) => file.value !== "chat")
+            .map(({ value, label, icon }) => (
+              <ProjectFileItem
+                key={value}
+                icon={icon}
+                label={label}
+                count={counts[value]}
+                isActive={activeView === value}
+                onClick={() => openFile(value)}
+              />
+            ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -298,16 +499,27 @@ function SessionItem({
 }
 
 function QueuePanel({ query }: { query: string }) {
-  const { projects, sessions } = useDataStore();
+  const { projects, sessions, tasks, workRuns, getTeamMembersByProject } = useDataStore();
   const { workspaceId, projectId, sessionId } = useSelectionStore();
-  const sidebarMode = useShellStore((s) => s.sidebarMode);
+  const { activeView, sidebarMode } = useShellStore();
 
   const workspaceProjects = useMemo(
     () =>
       projects
         .filter((project) => project.workspaceId === workspaceId)
-        .filter((project) => project.name.toLowerCase().includes(query.toLowerCase())),
-    [projects, workspaceId, query],
+        .filter((project) => {
+          const normalizedQuery = query.toLowerCase();
+          if (!normalizedQuery) return true;
+          return (
+            project.name.toLowerCase().includes(normalizedQuery) ||
+            sessions.some(
+              (session) =>
+                session.projectId === project.id &&
+                session.title.toLowerCase().includes(normalizedQuery),
+            )
+          );
+        }),
+    [projects, query, sessions, workspaceId],
   );
 
   const workspaceProjectIds = useMemo(
@@ -332,27 +544,42 @@ function QueuePanel({ query }: { query: string }) {
     [sessions, sidebarMode, projectId, workspaceProjectIds, query],
   );
 
+  const sessionsByProjectId = useMemo(() => {
+    const grouped = new Map<string, Session[]>();
+    for (const session of sessions) {
+      if (!workspaceProjectIds.has(session.projectId)) continue;
+      grouped.set(session.projectId, [...(grouped.get(session.projectId) ?? []), session]);
+    }
+    return grouped;
+  }, [sessions, workspaceProjectIds]);
+
+  const countsForProject = (id: string): Partial<Record<ViewType, number>> => {
+    const projectTasks = tasks.filter((task) => task.projectId === id);
+    return {
+      chat: sessions.filter((session) => session.projectId === id).length,
+      briefs: workRuns.filter((run) => run.projectId === id).length,
+      tasks: projectTasks.filter((task) => task.status !== "done").length,
+      board: projectTasks.length,
+      contacts: getTeamMembersByProject(id).length,
+    };
+  };
+
   if (sidebarMode === "projects") {
     return (
-      <div>
-        <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="p-2">
+        <div className="mb-1 flex items-center gap-2 px-1 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <FolderOpen className="size-3.5" />
           Projects
         </div>
         {workspaceProjects.map((project) => (
-          <ProjectItem
+          <ProjectTreeItem
             key={project.id}
             project={project}
             isActive={project.id === projectId}
-          />
-        ))}
-        <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Sessions
-        </div>
-        {visibleSessions.map((session) => (
-          <SessionItem
-            key={session.id}
-            session={session}
-            isActive={session.id === sessionId}
+            sessions={sessionsByProjectId.get(project.id) ?? []}
+            activeSessionId={sessionId}
+            activeView={activeView}
+            counts={countsForProject(project.id)}
           />
         ))}
       </div>
@@ -387,6 +614,8 @@ export function NavSidebar() {
   } = useShellStore();
   const { projectId, setSessionId } = useSelectionStore();
   const addSession = useDataStore((s) => s.addSession);
+  const inboxCount = useDataStore((s) => s.sessions.length);
+  const projectCount = useDataStore((s) => s.projects.length);
   const [query, setQuery] = useState("");
 
   const handleNewSession = async () => {
@@ -404,17 +633,41 @@ export function NavSidebar() {
         <div className="flex min-h-0 flex-1 flex-col gap-4 py-3">
           <TrialCallout />
           <div className="flex flex-col gap-0.5 px-2">
-            {primaryViews.map(({ value, label, icon, count }) => (
+            <ModuleButton
+              icon={Inbox}
+              label="Inbox"
+              count={inboxCount}
+              isActive={sidebarMode === "inbox"}
+              onClick={() => {
+                setSidebarMode("inbox");
+                setActiveView("chat");
+              }}
+            />
+            <ModuleButton
+              icon={FolderOpen}
+              label="Projects"
+              count={projectCount}
+              isActive={sidebarMode === "projects"}
+              onClick={() => {
+                setSidebarMode("projects");
+                if (!isProjectFileView(activeView)) setActiveView("chat");
+              }}
+            />
+          </div>
+
+          <Separator />
+
+          <div className="flex flex-col gap-0.5 px-2">
+            <p className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Utilities
+            </p>
+            {utilityViews.map(({ value, label, icon }) => (
               <ModuleButton
                 key={value}
                 icon={icon}
                 label={label}
-                count={count}
                 isActive={activeView === value}
-                onClick={() => {
-                  setActiveView(value);
-                  if (value === "chat") setSidebarMode("inbox");
-                }}
+                onClick={() => setActiveView(value)}
               />
             ))}
           </div>
@@ -423,9 +676,9 @@ export function NavSidebar() {
 
           <div className="flex flex-col gap-0.5 px-2">
             <p className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Teams
+              Workspace
             </p>
-            {sharedViews.map(({ label, icon }) => (
+            {workspaceUtilities.slice(0, 3).map(({ label, icon }) => (
               <ModuleButton key={label} icon={icon} label={label} />
             ))}
           </div>
@@ -472,23 +725,6 @@ export function NavSidebar() {
             </TooltipTrigger>
             <TooltipContent>New session</TooltipContent>
           </Tooltip>
-        </div>
-
-        <div className="grid grid-cols-2 border-b border-border p-2">
-          <Button
-            variant={sidebarMode === "inbox" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setSidebarMode("inbox")}
-          >
-            Inbox
-          </Button>
-          <Button
-            variant={sidebarMode === "projects" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setSidebarMode("projects")}
-          >
-            Projects
-          </Button>
         </div>
 
         <ScrollArea className="min-h-0 flex-1">

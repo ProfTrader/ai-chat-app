@@ -1,5 +1,5 @@
 import type { ChatContext } from "./context.js";
-import { buildSystemPrompt } from "./context.js";
+import { buildSystemPrompt, summarizeContextForActivity } from "./context.js";
 
 interface OllamaTagsResponse {
   models?: Array<{
@@ -105,7 +105,7 @@ export async function createOllamaChatStream(options: {
       writeActivity(
         "complete",
         "Project context inspected",
-        `${options.context.tasksSummary?.length ?? 0} task references and ${options.context.contextChips.length} context chips prepared.`,
+        summarizeContextForActivity(options.context),
         "inspect_project_context",
       );
       writeActivity(

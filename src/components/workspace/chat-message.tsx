@@ -70,12 +70,15 @@ function renderMarkdown(content: string, key: string) {
 }
 
 function parseProductionStream(content: string) {
-  const heading = "## HTML production stream";
-  const headingIndex = content.indexOf(heading);
-  if (headingIndex === -1) return null;
+  const headings = ["## Production stream", "## HTML production stream"];
+  const match = headings
+    .map((heading) => ({ heading, index: content.indexOf(heading) }))
+    .filter((item) => item.index !== -1)
+    .sort((a, b) => a.index - b.index)[0];
+  if (!match) return null;
 
-  const before = content.slice(0, headingIndex).trim();
-  const afterHeading = content.slice(headingIndex + heading.length).trim();
+  const before = content.slice(0, match.index).trim();
+  const afterHeading = content.slice(match.index + match.heading.length).trim();
   const createdIndex = afterHeading.search(/\nCreated \*\*/);
   const streamText = createdIndex === -1 ? afterHeading : afterHeading.slice(0, createdIndex).trim();
   const after = createdIndex === -1 ? "" : afterHeading.slice(createdIndex).trim();
@@ -105,7 +108,7 @@ function ProductionStream({
     <div className="flex flex-col gap-3">
       {renderMarkdown(stream.before, "before-stream")}
       <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5">
-        <div className="text-xs font-medium text-muted-foreground">HTML production stream</div>
+        <div className="text-xs font-medium text-muted-foreground">Production stream</div>
         {stream.current ? (
           <Marker role="status" className="text-sm">
             <MarkerIcon>
@@ -219,7 +222,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
             ) : null}
             {runId ? (
               <Button size="sm" variant="outline" onClick={viewBrief}>
-                View brief
+                View on canvas
                 <ArrowUpRight data-icon="inline-end" />
               </Button>
             ) : null}

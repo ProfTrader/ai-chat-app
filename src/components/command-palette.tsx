@@ -16,19 +16,22 @@ import { useDataStore } from "@/stores/data-store";
 import type { ViewType } from "@/types";
 
 export function CommandPalette() {
-  const { commandOpen, setCommandOpen, setActiveView } = useShellStore();
+  const { commandOpen, setCommandOpen, setActiveView, setSidebarMode } = useShellStore();
   const { setProjectId, setSessionId, selectTask, selectContact } =
     useSelectionStore();
   const { projects, sessions, tasks, contacts, getTeamMembersByProject } = useDataStore();
 
   const navigate = (view: ViewType) => {
     setActiveView(view);
+    if (["briefs", "tasks", "board", "contacts"].includes(view)) {
+      setSidebarMode("projects");
+    }
     setCommandOpen(false);
   };
 
   return (
     <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-      <CommandInput placeholder="Search projects, tasks, contacts..." />
+      <CommandInput placeholder="Search projects, threads, tasks, team..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         <CommandGroup heading="Views">
@@ -36,7 +39,7 @@ export function CommandPalette() {
           <CommandItem onSelect={() => navigate("briefs")}>Go to Briefs</CommandItem>
           <CommandItem onSelect={() => navigate("tasks")}>Go to Tasks</CommandItem>
           <CommandItem onSelect={() => navigate("board")}>Go to Board</CommandItem>
-          <CommandItem onSelect={() => navigate("contacts")}>Go to Contacts</CommandItem>
+          <CommandItem onSelect={() => navigate("contacts")}>Go to Team</CommandItem>
           <CommandItem onSelect={() => navigate("timeline")}>Go to Timeline</CommandItem>
           <CommandItem onSelect={() => navigate("nodes")}>Go to Nodes</CommandItem>
         </CommandGroup>
@@ -47,6 +50,7 @@ export function CommandPalette() {
               key={project.id}
               onSelect={() => {
                 setProjectId(project.id);
+                setSidebarMode("projects");
                 setCommandOpen(false);
               }}
             >
@@ -60,8 +64,10 @@ export function CommandPalette() {
             <CommandItem
               key={session.id}
               onSelect={() => {
+                setProjectId(session.projectId);
                 setSessionId(session.id);
                 setActiveView("chat");
+                setSidebarMode("projects");
                 setCommandOpen(false);
               }}
             >
@@ -81,8 +87,10 @@ export function CommandPalette() {
               <CommandItem
                 key={task.id}
                 onSelect={() => {
+                  setProjectId(task.projectId);
                   selectTask(task);
                   setActiveView("tasks");
+                  setSidebarMode("projects");
                   setCommandOpen(false);
                 }}
               >
@@ -101,7 +109,7 @@ export function CommandPalette() {
           })}
         </CommandGroup>
         <CommandSeparator />
-        <CommandGroup heading="Contacts">
+        <CommandGroup heading="Team and contacts">
           {contacts.slice(0, 8).map((contact) => {
             const profile = enrichContact(contact);
 
@@ -109,8 +117,10 @@ export function CommandPalette() {
               <CommandItem
                 key={contact.id}
                 onSelect={() => {
+                  setProjectId(contact.projectId);
                   selectContact(contact);
                   setActiveView("contacts");
+                  setSidebarMode("projects");
                   setCommandOpen(false);
                 }}
               >

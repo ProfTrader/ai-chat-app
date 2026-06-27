@@ -27,9 +27,10 @@ import {
 } from "@/components/ui/message";
 import { Spinner } from "@/components/ui/spinner";
 import { ChatMessage } from "@/components/workspace/chat-message";
-import { useChatSession } from "@/lib/chat/chat-session-provider";
+import { useChatSession, type ChatActivity } from "@/lib/chat/chat-session-provider";
 import { useAuthStore } from "@/stores/auth-store";
 import { useShellStore } from "@/stores/shell-store";
+import { cn } from "@/lib/utils";
 
 const thinkingPhrases = [
   "Dexter is thinking through the request",
@@ -77,8 +78,55 @@ function AssistantWarmupMarker() {
   );
 }
 
+function ActivityStatusDot({ status }: { status: ChatActivity["status"] }) {
+  return (
+    <span
+      className={cn(
+        "mt-1 size-2 shrink-0 rounded-full",
+        status === "running" && "animate-pulse bg-active",
+        status === "complete" && "bg-success",
+        status === "error" && "bg-destructive",
+      )}
+    />
+  );
+}
+
+function AgentActivityTrail({ activities }: { activities: ChatActivity[] }) {
+  if (activities.length === 0) return null;
+
+  return (
+    <Message align="start" className="items-end">
+      <MessageAvatar className="bg-transparent">
+        <Avatar size="sm" className="bg-primary/10">
+          <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
+        </Avatar>
+      </MessageAvatar>
+      <MessageContent className="max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5">
+        <MessageHeader className="px-1">
+          <span>Agent activity</span>
+        </MessageHeader>
+        <div className="w-fit min-w-72 max-w-full rounded-md border border-border bg-card/70 px-3 py-2 text-xs shadow-sm">
+          <div className="space-y-2">
+            {activities.slice(-5).map((activity) => (
+              <div key={activity.id} className="flex gap-2">
+                <ActivityStatusDot status={activity.status} />
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">{activity.label}</p>
+                  {activity.detail ? (
+                    <p className="mt-0.5 text-muted-foreground">{activity.detail}</p>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </MessageContent>
+    </Message>
+  );
+}
+
 export function ChatThread() {
-  const { messages, status } = useChatSession();
+  const { messages, status, activities, pendingBriefPlan } = useChatSession();
   const connected = useAuthStore((s) => s.status?.connected);
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
 
@@ -110,6 +158,10 @@ export function ChatThread() {
       ? [...messages].reverse().find((message) => message.role === "assistant")?.id
       : undefined;
   const hasAssistantInFlight = Boolean(streamingAssistantId);
+  const showActivityTrail =
+    status === "submitted" ||
+    status === "streaming" ||
+    activities.some((activity) => activity.status === "running" || activity.status === "error");
 
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
@@ -117,7 +169,10 @@ export function ChatThread() {
         <MessageScrollerViewport className="scroll-fade-y">
           <MessageScrollerContent
             aria-busy={status === "submitted" || status === "streaming"}
-            className="mx-auto w-full max-w-3xl gap-5 px-5 py-6 pb-32"
+            className={cn(
+              "mx-auto w-full max-w-3xl gap-5 px-5 py-6",
+              pendingBriefPlan ? "pb-56" : "pb-32",
+            )}
           >
             {messages.map((message) => (
               <MessageScrollerItem
@@ -131,6 +186,11 @@ export function ChatThread() {
                 />
               </MessageScrollerItem>
             ))}
+            {showActivityTrail && activities.length > 0 && (
+              <MessageScrollerItem messageId="agent-activity">
+                <AgentActivityTrail activities={activities} />
+              </MessageScrollerItem>
+            )}
             {status === "submitted" && !hasAssistantInFlight && (
               <MessageScrollerItem messageId="assistant-warmup">
                 <AssistantWarmupMarker />

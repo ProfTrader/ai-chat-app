@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   BarChart3,
   CheckCircle2,
@@ -8,18 +8,29 @@ import {
   Upload,
   ArrowUpRight,
   BookOpen,
+  Download,
+  FileText,
+  History,
+  ListChecks,
+  Printer,
+  ShieldCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -33,6 +44,7 @@ import {
   type KnowledgePackId,
 } from "@/lib/agents/knowledge-packs";
 import { briefStyleLabel } from "@/lib/artifacts/brief-loop";
+import { briefTemplateLabels } from "@/lib/artifacts/design";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -41,10 +53,12 @@ import type {
   ArtifactBlock,
   ArtifactSection,
   ArtifactChart,
+  ArtifactClaim,
   ArtifactTable,
   DatasetSemanticRole,
   DraftArtifact,
   EvidenceSource,
+  PendingArtifactPlan,
   ProjectDataset,
   WorkRun,
 } from "@/types";
@@ -97,6 +111,9 @@ function WorkRunList({
                 <span className="line-clamp-2 font-medium">{run.title}</span>
                 <span className="flex items-center gap-2">
                   <Badge variant="secondary">{draft ? briefStyleLabel(draft.style) : "Brief"}</Badge>
+                  {draft?.designTemplate ? (
+                    <Badge variant="outline">{briefTemplateLabels[draft.designTemplate]}</Badge>
+                  ) : null}
                   <span>{run.audit.score}/100</span>
                 </span>
               </button>
@@ -799,12 +816,418 @@ function ArtifactReader({
   );
 }
 
+function collectClaims(draft: DraftArtifact): ArtifactClaim[] {
+  return (
+    draft.artifactSections?.flatMap((section) =>
+      section.blocks.flatMap((block) => (block.type === "finding" ? block.claims : [])),
+    ) ?? []
+  );
+}
+
+function claimGroups(claims: ArtifactClaim[]) {
+  return {
+    supported: claims.filter((claim) => !claim.assumption && claim.citationIds.length > 0),
+    assumptions: claims.filter((claim) => claim.assumption),
+    lowConfidence: claims.filter((claim) => claim.confidence < 0.65),
+    missingCitations: claims.filter((claim) => claim.citationIds.length === 0),
+  };
+}
+
+function findPlanForRun(run: WorkRun, plans: PendingArtifactPlan[]) {
+  return (
+    plans.find((plan) => plan.sourceRunId === run.id) ??
+    plans.find((plan) => plan.id === run.sourcePlanId)
+  );
+}
+
+function downloadHtml(draft: DraftArtifact) {
+  const artifact = draft.htmlArtifact;
+  if (!artifact) return;
+  const blob = new Blob([artifact.html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = artifact.fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function openPrintableHtml(draft: DraftArtifact) {
+  const artifact = draft.htmlArtifact;
+  if (!artifact) return;
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) return;
+  win.document.open();
+  win.document.write(artifact.html);
+  win.document.close();
+  win.focus();
+  window.setTimeout(() => win.print(), 500);
+}
+
+function StudioStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-background p-3">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function HtmlArtifactPreview({
+  run,
+  draft,
+}: {
+  run: WorkRun;
+  draft: DraftArtifact;
+}) {
+  if (!draft.htmlArtifact) {
+    return <ArtifactReader run={run} draft={draft} />;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-background shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{draft.htmlArtifact.fileName}</p>
+          <p className="text-xs text-muted-foreground">
+            Standalone HTML artifact - citations, audit, appendix, and print controls included
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => downloadHtml(draft)}>
+            <Download data-icon="inline-start" />
+            HTML
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => openPrintableHtml(draft)}>
+            <Printer data-icon="inline-start" />
+            PDF
+          </Button>
+        </div>
+      </div>
+      <iframe
+        title={draft.htmlArtifact.title}
+        srcDoc={draft.htmlArtifact.html}
+        sandbox="allow-scripts allow-popups allow-modals"
+        className="h-[72vh] w-full bg-background"
+      />
+    </div>
+  );
+}
+
+function PlanTab({
+  run,
+  plan,
+}: {
+  run: WorkRun;
+  plan?: PendingArtifactPlan;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <section className="rounded-md border border-border bg-background p-5">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Approved plan
+        </p>
+        <pre className="mt-4 whitespace-pre-wrap text-sm leading-7 text-foreground">
+          {plan?.markdown ??
+            run.approvedPlanMarkdown ??
+            [
+              `Objective: ${run.plan.objective}`,
+              "",
+              `Audience: ${run.plan.audience}`,
+              "",
+              "Questions:",
+              ...run.plan.questions.map((question) => `- ${question}`),
+              "",
+              "Success criteria:",
+              ...run.plan.successCriteria.map((item) => `- ${item}`),
+            ].join("\n")}
+        </pre>
+      </section>
+      <aside className="space-y-3">
+        <StudioStat label="Status" value={plan?.status ?? (run.plan.approved ? "approved" : "draft")} />
+        <StudioStat label="Format" value={plan?.deliverableFormat?.toUpperCase() ?? "HTML"} />
+        <StudioStat label="Run" value={run.iteration ? `Iteration ${run.iteration}` : "Iteration 1"} />
+        <div className="rounded-md border border-border bg-background p-3">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Request</p>
+          <p className="mt-2 text-sm leading-6">{run.request}</p>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function EvidenceStudioTab({
+  run,
+  draft,
+}: {
+  run: WorkRun;
+  draft: DraftArtifact;
+}) {
+  const claims = collectClaims(draft);
+  const claimBySource = new Map<string, ArtifactClaim[]>();
+  claims.forEach((claim) => {
+    claim.citationIds.forEach((sourceId) => {
+      claimBySource.set(sourceId, [...(claimBySource.get(sourceId) ?? []), claim]);
+    });
+  });
+
+  return (
+    <div className="grid gap-3">
+      {run.evidence.map((source, index) => (
+        <section key={source.id} className="rounded-md border border-border bg-background p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">
+                [{index + 1}] {source.title}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{source.source}</p>
+            </div>
+            <Badge variant={source.missing ? "destructive" : "secondary"}>
+              {source.missing ? "Missing" : `${Math.round(source.confidence * 100)}%`}
+            </Badge>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{source.excerpt}</p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {(claimBySource.get(source.id) ?? []).map((claim) => (
+              <Badge key={claim.id} variant="outline" className="max-w-full truncate">
+                {claim.claim}
+              </Badge>
+            ))}
+            {(claimBySource.get(source.id) ?? []).length === 0 ? (
+              <Badge variant="outline">No linked claim</Badge>
+            ) : null}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function ClaimsAuditTab({
+  run,
+  draft,
+}: {
+  run: WorkRun;
+  draft: DraftArtifact;
+}) {
+  const groups = claimGroups(collectClaims(draft));
+  const buckets = [
+    { id: "supported", title: "Supported", claims: groups.supported },
+    { id: "assumptions", title: "Assumptions", claims: groups.assumptions },
+    { id: "low", title: "Low confidence", claims: groups.lowConfidence },
+    { id: "missing", title: "Missing citations", claims: groups.missingCitations },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StudioStat label="Audit score" value={`${run.audit.score}/100`} />
+        <StudioStat label="Supported" value={groups.supported.length} />
+        <StudioStat label="Assumptions" value={groups.assumptions.length} />
+        <StudioStat label="Fixes" value={run.audit.requiredFixes.length} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {buckets.map((bucket) => (
+          <section key={bucket.id} className="rounded-md border border-border bg-background p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold">{bucket.title}</p>
+              <Badge variant="secondary">{bucket.claims.length}</Badge>
+            </div>
+            <div className="mt-3 space-y-2">
+              {bucket.claims.length === 0 ? (
+                <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+                  No claims in this bucket.
+                </p>
+              ) : (
+                bucket.claims.map((claim) => (
+                  <article key={`${bucket.id}-${claim.id}`} className="rounded-md border border-border bg-muted/30 p-3">
+                    <p className="text-sm leading-6">{claim.claim}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge variant={claim.assumption ? "outline" : "secondary"}>
+                        {claim.assumption ? "Assumption" : `${Math.round(claim.confidence * 100)}%`}
+                      </Badge>
+                      <Badge variant={claim.citationIds.length ? "outline" : "destructive"}>
+                        {claim.citationIds.length} citations
+                      </Badge>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VersionsTab({
+  run,
+  selectedDraftId,
+  onSelectDraft,
+}: {
+  run: WorkRun;
+  selectedDraftId?: string;
+  onSelectDraft: (id: string) => void;
+}) {
+  return (
+    <div className="grid gap-3">
+      {run.drafts.map((draft) => (
+        <button
+          key={draft.id}
+          type="button"
+          onClick={() => onSelectDraft(draft.id)}
+          className={cn(
+            "rounded-md border p-4 text-left transition-colors",
+            selectedDraftId === draft.id
+              ? "border-active/40 bg-active/5"
+              : "border-border bg-background hover:bg-muted/50",
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">
+                v{draft.version} - {draft.title}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {new Date(draft.createdAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="secondary">{briefStyleLabel(draft.style)}</Badge>
+              {draft.designTemplate ? (
+                <Badge variant="outline">{briefTemplateLabels[draft.designTemplate]}</Badge>
+              ) : null}
+              {draft.htmlArtifact?.exportReady ? <Badge>Export ready</Badge> : null}
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ExportTab({ draft }: { draft: DraftArtifact }) {
+  const artifact = draft.htmlArtifact;
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="rounded-md border border-border bg-background p-5">
+        <p className="text-sm font-semibold">Delivery package</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          The v1 export path is HTML-first. The standalone file includes the toolbar,
+          citations, claims audit, evidence appendix, and print/PDF styles.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button disabled={!artifact} onClick={() => downloadHtml(draft)}>
+            <Download data-icon="inline-start" />
+            Download HTML
+          </Button>
+          <Button disabled={!artifact} variant="secondary" onClick={() => openPrintableHtml(draft)}>
+            <Printer data-icon="inline-start" />
+            Print / Save PDF
+          </Button>
+        </div>
+      </section>
+      <aside className="space-y-3">
+        <StudioStat label="File" value={artifact?.fileName ?? "Not generated"} />
+        <StudioStat label="Visuals" value={artifact?.visualizationCount ?? 0} />
+        <StudioStat label="Tables" value={artifact?.tableCount ?? 0} />
+        <StudioStat label="Sources" value={artifact?.evidenceCount ?? 0} />
+      </aside>
+    </div>
+  );
+}
+
+function BriefStudio({
+  run,
+  draft,
+  plan,
+  selectedDraftId,
+  onSelectDraft,
+}: {
+  run: WorkRun;
+  draft: DraftArtifact;
+  plan?: PendingArtifactPlan;
+  selectedDraftId?: string;
+  onSelectDraft: (id: string) => void;
+}) {
+  return (
+    <article className="mx-auto max-w-7xl space-y-4">
+      <section className="rounded-md border border-border bg-pane p-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">Brief artifact module</Badge>
+              <Badge variant={run.audit.publishReady ? "default" : "outline"}>
+                {run.audit.score}/100 audit
+              </Badge>
+              {draft.designTemplate ? (
+                <Badge variant="outline">{briefTemplateLabels[draft.designTemplate]}</Badge>
+              ) : null}
+            </div>
+            <h1 className="mt-3 truncate text-xl font-semibold">{draft.title}</h1>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Chat remains the control surface; this is the brief delivery module created from the approved plan,
+              tool evidence, model narrative, and deterministic audit.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-right">
+            <StudioStat label="Version" value={`v${draft.version}`} />
+            <StudioStat label="Stages" value={draft.htmlArtifact?.deliveryStages?.length ?? run.deliveryStages?.length ?? 0} />
+            <StudioStat label="Export" value={draft.htmlArtifact?.exportReady ? "Ready" : "Draft"} />
+          </div>
+        </div>
+      </section>
+
+      <Tabs defaultValue="preview" className="space-y-4">
+        <TabsList className="flex h-auto flex-wrap justify-start">
+          <TabsTrigger value="preview"><FileText data-icon="inline-start" />Preview</TabsTrigger>
+          <TabsTrigger value="plan"><ListChecks data-icon="inline-start" />Plan</TabsTrigger>
+          <TabsTrigger value="evidence"><Database data-icon="inline-start" />Evidence</TabsTrigger>
+          <TabsTrigger value="audit"><ShieldCheck data-icon="inline-start" />Claims Audit</TabsTrigger>
+          <TabsTrigger value="versions"><History data-icon="inline-start" />Versions</TabsTrigger>
+          <TabsTrigger value="export"><Download data-icon="inline-start" />Export</TabsTrigger>
+        </TabsList>
+        <TabsContent value="preview">
+          <HtmlArtifactPreview run={run} draft={draft} />
+        </TabsContent>
+        <TabsContent value="plan">
+          <PlanTab run={run} plan={plan} />
+        </TabsContent>
+        <TabsContent value="evidence">
+          <EvidenceStudioTab run={run} draft={draft} />
+        </TabsContent>
+        <TabsContent value="audit">
+          <ClaimsAuditTab run={run} draft={draft} />
+        </TabsContent>
+        <TabsContent value="versions">
+          <VersionsTab
+            run={run}
+            selectedDraftId={selectedDraftId}
+            onSelectDraft={onSelectDraft}
+          />
+        </TabsContent>
+        <TabsContent value="export">
+          <ExportTab draft={draft} />
+        </TabsContent>
+      </Tabs>
+    </article>
+  );
+}
+
 export function BriefsWorkspace() {
   const projectId = useSelectionStore((state) => state.projectId);
   const {
     workRuns,
     selectedWorkRunId,
     datasets,
+    pendingArtifactPlans,
     addKnowledgePackDataset,
     addSampleDataset,
     importCsvDataset,
@@ -827,7 +1250,18 @@ export function BriefsWorkspace() {
       workRuns[0],
     [projectRuns, selectedWorkRunId, workRuns],
   );
-  const draft = selectedRun ? latestDraft(selectedRun) : undefined;
+  const latestSelectedDraft = selectedRun ? latestDraft(selectedRun) : undefined;
+  const [selectedDraftId, setSelectedDraftId] = useState<string | undefined>(latestSelectedDraft?.id);
+  useEffect(() => {
+    setSelectedDraftId(latestSelectedDraft?.id);
+  }, [latestSelectedDraft?.id, selectedRun?.id]);
+  const draft = useMemo(
+    () =>
+      selectedRun?.drafts.find((item) => item.id === selectedDraftId) ??
+      latestSelectedDraft,
+    [latestSelectedDraft, selectedDraftId, selectedRun?.drafts],
+  );
+  const selectedPlan = selectedRun ? findPlanForRun(selectedRun, pendingArtifactPlans) : undefined;
   if (!selectedRun || !draft) {
     return (
       <div className="grid h-full gap-4 bg-shell p-6 lg:grid-cols-[minmax(0,420px)]">
@@ -852,7 +1286,13 @@ export function BriefsWorkspace() {
       <WorkRunList runs={projectRuns} selectedId={selectedRun.id} onSelect={selectWorkRun} />
       <ScrollArea className="min-h-0">
         <div className="p-5">
-          <ArtifactReader run={selectedRun} draft={draft} />
+          <BriefStudio
+            run={selectedRun}
+            draft={draft}
+            plan={selectedPlan}
+            selectedDraftId={selectedDraftId}
+            onSelectDraft={setSelectedDraftId}
+          />
         </div>
       </ScrollArea>
     </div>

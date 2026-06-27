@@ -22,12 +22,85 @@ export const chatContextSchema = z.object({
         identifier: z.string(),
         title: z.string(),
         status: z.string(),
+        description: z.string().optional(),
+        priority: z.string().optional(),
+        assignee: z.string().optional(),
+        dueDate: z.string().optional(),
       }),
     )
-    .optional(),
+    .default([]),
+  contactsSummary: z
+    .array(
+      z.object({
+        name: z.string(),
+        company: z.string(),
+        notes: z.string().optional(),
+        lastActivity: z.string().optional(),
+      }),
+    )
+    .default([]),
+  teamSummary: z
+    .array(
+      z.object({
+        name: z.string(),
+        role: z.string(),
+        status: z.string().optional(),
+      }),
+    )
+    .default([]),
+  datasetsSummary: z
+    .array(
+      z.object({
+        name: z.string(),
+        domainId: z.string(),
+        sourceKind: z.string(),
+        rowCount: z.number(),
+        columnCount: z.number(),
+        columns: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+  memoriesSummary: z
+    .array(
+      z.object({
+        kind: z.string(),
+        title: z.string(),
+        body: z.string(),
+        confidence: z.number().optional(),
+      }),
+    )
+    .default([]),
+  recentMessages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 export type ChatContext = z.infer<typeof chatContextSchema>;
+
+function truncate(value: string | undefined, maxLength = 220) {
+  if (!value) return "";
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+export function summarizeContextForActivity(context: ChatContext) {
+  const rowCount = context.datasetsSummary.reduce(
+    (total, dataset) => total + dataset.rowCount,
+    0,
+  );
+  return [
+    `${context.tasksSummary.length} tasks`,
+    `${context.contactsSummary.length + context.teamSummary.length} people`,
+    `${context.datasetsSummary.length} datasets`,
+    `${rowCount.toLocaleString()} rows`,
+    `${context.memoriesSummary.length} memories`,
+    `${context.contextChips.length} chips`,
+  ].join(", ");
+}
 
 export function buildSystemPrompt(context: ChatContext): string {
   const chips =
@@ -36,11 +109,72 @@ export function buildSystemPrompt(context: ChatContext): string {
       : "None";
 
   const tasks =
-    context.tasksSummary && context.tasksSummary.length > 0
+    context.tasksSummary.length > 0
       ? context.tasksSummary
-          .map((t) => `- ${t.identifier} [${t.status}] ${t.title}`)
+          .map((task) =>
+            [
+              `- ${task.identifier} [${task.status}] ${task.title}`,
+              task.priority ? `priority=${task.priority}` : "",
+              task.assignee ? `owner=${task.assignee}` : "",
+              task.dueDate ? `due=${task.dueDate}` : "",
+              task.description ? `notes=${truncate(task.description)}` : "",
+            ]
+              .filter(Boolean)
+              .join(" | "),
+          )
           .join("\n")
       : "No open tasks provided.";
+
+  const contacts =
+    context.contactsSummary.length > 0
+      ? context.contactsSummary
+          .map((contact) =>
+            [
+              `- ${contact.name} (${contact.company})`,
+              contact.lastActivity ? `last=${contact.lastActivity}` : "",
+              contact.notes ? `notes=${truncate(contact.notes)}` : "",
+            ]
+              .filter(Boolean)
+              .join(" | "),
+          )
+          .join("\n")
+      : "No external contacts provided.";
+
+  const team =
+    context.teamSummary.length > 0
+      ? context.teamSummary
+          .map((member) =>
+            `- ${member.name} (${member.role}${member.status ? `, ${member.status}` : ""})`,
+          )
+          .join("\n")
+      : "No internal team members provided.";
+
+  const datasets =
+    context.datasetsSummary.length > 0
+      ? context.datasetsSummary
+          .map(
+            (dataset) =>
+              `- ${dataset.name} [${dataset.domainId}/${dataset.sourceKind}] ${dataset.rowCount.toLocaleString()} rows, ${dataset.columnCount} columns: ${dataset.columns.join(", ") || "columns not listed"}`,
+          )
+          .join("\n")
+      : "No project datasets provided.";
+
+  const memories =
+    context.memoriesSummary.length > 0
+      ? context.memoriesSummary
+          .map(
+            (memory) =>
+              `- ${memory.kind}: ${memory.title} | ${truncate(memory.body, 220)}${typeof memory.confidence === "number" ? ` | confidence=${memory.confidence.toFixed(2)}` : ""}`,
+          )
+          .join("\n")
+      : "No durable project memories provided.";
+
+  const recentMessages =
+    context.recentMessages.length > 0
+      ? context.recentMessages
+          .map((message) => `- ${message.role}: ${truncate(message.content, 260)}`)
+          .join("\n")
+      : "No recent messages provided.";
 
   const modeInstructions =
     context.composerMode === "plan"
@@ -57,12 +191,33 @@ Composer mode: ${context.composerMode}
 Context chips:
 ${chips}
 
-Open tasks for this project:
+Project database snapshot:
+
+Tasks:
 ${tasks}
+
+Contacts:
+${contacts}
+
+Team:
+${team}
+
+Datasets:
+${datasets}
+
+Project memory:
+${memories}
+
+Recent conversation:
+${recentMessages}
 
 Behavior:
 - ${modeInstructions}
-- Reference tasks, contacts, and project context when relevant.
+- Ground answers in the project database snapshot first.
+- Reuse durable project memory when it is relevant, especially explicit user preferences.
+- If evidence is missing, say what is missing instead of inventing facts.
+- When the user asks for analysis, briefly state what you inspected before recommendations.
+- Reference tasks, contacts, datasets, team members, and project context when relevant.
 - Stay professional and helpful for sales and project management workflows.`;
 }
 

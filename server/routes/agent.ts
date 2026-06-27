@@ -13,7 +13,7 @@ import {
   validateMoonshotApiKey,
 } from "../lib/auth.js";
 import { createMoonshotChatCompletion } from "../lib/moonshot.js";
-import { loadTradeifyDesignBrief } from "../lib/artifact-design.js";
+import { loadNexusDesignBrief } from "../lib/artifact-design.js";
 
 const agent = new Hono();
 
@@ -35,6 +35,174 @@ const tools = [
 }));
 
 agent.get("/tools", (c) => c.json({ tools }));
+
+const skills = [
+  {
+    id: "project_context_retrieval",
+    name: "Project context retrieval",
+    description: "Builds a compact context pack from chat, tasks, board, briefs, team, datasets, and memory.",
+    scope: "project",
+    risk: "low",
+    requiredTools: ["inspect_project_context"],
+  },
+  {
+    id: "brief_artifact_delivery",
+    name: "Brief artifact delivery",
+    description: "Plans, drafts, audits, and exports evidence-backed HTML brief artifacts.",
+    scope: "project",
+    risk: "medium",
+    requiredTools: ["inspect_dataset", "create_brief_artifact", "audit_artifact"],
+  },
+  {
+    id: "task_proposal",
+    name: "Task proposal",
+    description: "Turns source-backed findings into approval-gated tasks and board changes.",
+    scope: "project",
+    risk: "medium",
+    requiredTools: ["propose_work"],
+  },
+  {
+    id: "gateway_triage",
+    name: "Gateway triage",
+    description: "Normalizes chat, webhook, Slack, and email ingress into one project run ledger.",
+    scope: "gateway",
+    risk: "low",
+    requiredTools: ["route_gateway_message", "inspect_project_context"],
+  },
+  {
+    id: "memory_reflection",
+    name: "Memory reflection",
+    description: "Captures durable facts, preferences, and evidence notes after agent runs.",
+    scope: "project",
+    risk: "low",
+    requiredTools: ["write_project_memory"],
+  },
+];
+
+const agentRunEvents = new Map<string, Array<Record<string, unknown>>>();
+
+const agentRunRequestSchema = z.object({
+  projectId: z.string().min(1),
+  sessionId: z.string().optional(),
+  gatewayMessageId: z.string().optional(),
+  request: z.string().min(1),
+  intent: z
+    .enum(["conversation", "brief", "task_proposal", "gateway_notification"])
+    .optional(),
+  outputKind: z
+    .enum(["conversation", "tool_call", "plan", "artifact", "task_proposal", "gateway_notification"])
+    .optional(),
+  model: z.string().optional(),
+});
+
+const approvalRequestSchema = z.object({
+  action: z.string().default("approve"),
+  note: z.string().optional(),
+});
+
+function classifyAgentRequest(request: string) {
+  const input = request.toLowerCase();
+  if (/\b(brief|memo|report|artifact|pdf|html)\b/.test(input)) return "brief";
+  if (/\b(task|todo|assign|owner|board|follow[- ]?up)\b/.test(input)) return "task_proposal";
+  if (/\b(webhook|slack|email|notify|gateway)\b/.test(input)) return "gateway_notification";
+  return "conversation";
+}
+
+agent.get("/skills", (c) => c.json({ skills }));
+
+agent.post("/runs", async (c) => {
+  const body = agentRunRequestSchema.parse(await c.req.json());
+  const now = new Date().toISOString();
+  const intent = body.intent ?? classifyAgentRequest(body.request);
+  const run = {
+    id: `brain-run-${crypto.randomUUID().slice(0, 8)}`,
+    projectId: body.projectId,
+    sessionId: body.sessionId,
+    gatewayMessageId: body.gatewayMessageId,
+    title: `${intent.replace(/_/g, " ")} run`,
+    request: body.request,
+    intent,
+    status: "running",
+    trustLevel: 0,
+    currentStage: "retrieve_context",
+    contextPackId: `ctx-${crypto.randomUUID().slice(0, 8)}`,
+    outputKind:
+      body.outputKind ??
+      (intent === "brief"
+        ? "plan"
+        : intent === "task_proposal"
+          ? "task_proposal"
+          : intent === "gateway_notification"
+            ? "gateway_notification"
+            : "conversation"),
+    model: body.model,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const events = [
+    {
+      id: `event-${crypto.randomUUID().slice(0, 8)}`,
+      runId: run.id,
+      stage: "ingest",
+      title: "Request received",
+      detail: "Gateway/chat request normalized into the Nexus agent run ledger.",
+      status: "completed",
+      createdAt: now,
+    },
+    {
+      id: `event-${crypto.randomUUID().slice(0, 8)}`,
+      runId: run.id,
+      stage: "classify",
+      title: "Intent classified",
+      detail: `Intent classified as ${intent.replace(/_/g, " ")}.`,
+      status: "completed",
+      createdAt: now,
+    },
+    {
+      id: `event-${crypto.randomUUID().slice(0, 8)}`,
+      runId: run.id,
+      stage: "retrieve_context",
+      title: "Context retrieval queued",
+      detail: "The browser-local context engine should attach project data, memory, and evidence.",
+      status: "running",
+      createdAt: now,
+    },
+  ];
+  agentRunEvents.set(run.id, events);
+  return c.json({ run, events });
+});
+
+agent.get("/runs/:id/events", (c) => {
+  const runId = c.req.param("id");
+  return c.json({ runId, events: agentRunEvents.get(runId) ?? [] });
+});
+
+agent.post("/runs/:id/approve", async (c) => {
+  const runId = c.req.param("id");
+  const body = approvalRequestSchema.parse(await c.req.json().catch(() => ({})));
+  const now = new Date().toISOString();
+  const approval = {
+    id: `approval-${crypto.randomUUID().slice(0, 8)}`,
+    runId,
+    action: body.action,
+    note: body.note,
+    status: "approved",
+    createdAt: now,
+    resolvedAt: now,
+  };
+  const events = agentRunEvents.get(runId) ?? [];
+  events.push({
+    id: `event-${crypto.randomUUID().slice(0, 8)}`,
+    runId,
+    stage: "execute_tools",
+    title: "Approval received",
+    detail: body.note ?? "User approved the gated step.",
+    status: "completed",
+    createdAt: now,
+  });
+  agentRunEvents.set(runId, events);
+  return c.json({ approval, events });
+});
 
 function parseModelJson(content: string) {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
@@ -169,8 +337,25 @@ const briefStreamRequestSchema = briefRequestSchema.extend({
     .optional(),
 });
 
+const briefIntentSchema = z.enum([
+  "executive_decision",
+  "operational_review",
+  "risk_compliance",
+  "market_intelligence",
+  "performance_snapshot",
+  "action_plan",
+]);
+
+const briefDesignTemplateSchema = z.enum([
+  "executive_board",
+  "ops_command",
+  "risk_compliance",
+]);
+
 const briefResponseSchema = z.object({
   title: z.string().min(8).max(140),
+  briefIntent: briefIntentSchema.default("executive_decision"),
+  designTemplate: briefDesignTemplateSchema.default("executive_board"),
   executiveSummary: z.string().min(80),
   thesis: z.string().min(40),
   takeaways: z.array(z.string().min(8)).min(1).max(5),
@@ -274,6 +459,8 @@ function salvageBriefResponseFromModelText(content: string): BriefResponse {
 
   return briefResponseSchema.parse({
     title: extractStringField(content, "title") || "Model-written brief narrative",
+    briefIntent: "risk_compliance",
+    designTemplate: "risk_compliance",
     executiveSummary: summary,
     thesis,
     takeaways: [
@@ -311,6 +498,8 @@ function salvageBriefResponseFromModelText(content: string): BriefResponse {
 function normalizeBriefResponse(parsed: BriefResponse): BriefResponse {
   return {
     title: normalizeModelText(parsed.title),
+    briefIntent: parsed.briefIntent,
+    designTemplate: parsed.designTemplate,
     executiveSummary: normalizeModelText(parsed.executiveSummary),
     thesis: normalizeModelText(parsed.thesis),
     takeaways: parsed.takeaways.map(normalizeModelText),
@@ -476,7 +665,7 @@ agent.post("/brief", async (c) => {
         `- ${section.title}: ${section.purpose ?? "No stated purpose"} (${section.blocks.length} artifact blocks)`,
     )
     .join("\n");
-  const designBrief = await loadTradeifyDesignBrief();
+  const designBrief = await loadNexusDesignBrief();
 
   const user = `Write the structured Nexus brief narrative from this deterministic analysis.
 
@@ -514,11 +703,15 @@ Rules:
 - Keep all numerical claims exactly as supplied by evidence or tool trace.
 - citationIds and sourceIds must be selected only from the allowed evidence IDs above.
 - If a useful idea has no evidence ID, set assumption to true and leave citationIds empty.
-- Use the design brief for tone and HTML presentation intent, but do not invent Tradeify operating metrics or competitor facts.
+- Use the design brief for tone and HTML presentation intent, but do not invent operating metrics, customer counts, competitor facts, or project facts.
+- Choose briefIntent from executive_decision, operational_review, risk_compliance, market_intelligence, performance_snapshot, action_plan.
+- Choose designTemplate from executive_board, ops_command, risk_compliance. Match executive/board/strategy requests to executive_board, ops/status/execution requests to ops_command, and audit/risk/compliance requests to risk_compliance.
 - Do not mention task, board, owner, or roadmap changes as already applied.
 - Return only JSON with this shape:
 {
   "title": "brief title",
+  "briefIntent": "executive_decision",
+  "designTemplate": "executive_board",
   "executiveSummary": "120-180 word evidence-grounded summary",
   "thesis": "one concise thesis paragraph",
   "takeaways": ["3 to 5 crisp takeaways"],
@@ -582,10 +775,10 @@ agent.post("/brief-stream", async (c) => {
           label: "Inspecting evidence",
           detail: `${body.data.evidence.length} evidence groups and ${body.data.toolInvocations.length} tool traces prepared.`,
         });
-        const designBrief = await loadTradeifyDesignBrief();
+        const designBrief = await loadNexusDesignBrief();
         writeEvent(controller, "design_brief_loaded", {
           label: "Design brief loaded",
-          detail: "Tradeify design.md is attached for brand memory, logo treatment, visual tone, and report styling rules.",
+          detail: "Nexus design.md is attached for artifact presentation, visual tone, and report styling rules.",
         });
 
         if (!briefModel) {
@@ -675,11 +868,15 @@ Rules:
 - Keep all numerical claims exactly as supplied by evidence or tool trace.
 - citationIds and sourceIds must be selected only from the allowed evidence IDs above.
 - If a useful idea has no evidence ID, set assumption to true and leave citationIds empty.
-- Use the design brief for tone and HTML presentation intent, but do not invent Tradeify operating metrics or competitor facts.
+- Use the design brief for tone and HTML presentation intent, but do not invent operating metrics, customer counts, competitor facts, or project facts.
+- Choose briefIntent from executive_decision, operational_review, risk_compliance, market_intelligence, performance_snapshot, action_plan.
+- Choose designTemplate from executive_board, ops_command, risk_compliance. Match executive/board/strategy requests to executive_board, ops/status/execution requests to ops_command, and audit/risk/compliance requests to risk_compliance.
 - Do not mention task, board, owner, or roadmap changes as already applied.
 - Return only JSON with this shape:
 {
   "title": "brief title",
+  "briefIntent": "executive_decision",
+  "designTemplate": "executive_board",
   "executiveSummary": "120-180 word evidence-grounded summary",
   "thesis": "one concise thesis paragraph",
   "takeaways": ["3 to 5 crisp takeaways"],

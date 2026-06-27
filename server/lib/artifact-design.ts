@@ -3,7 +3,7 @@ import path from "node:path";
 
 let cachedDesign: string | null = null;
 
-export async function loadTradeifyDesignBrief() {
+export async function loadNexusDesignBrief() {
   if (cachedDesign) return cachedDesign;
 
   try {
@@ -13,10 +13,9 @@ export async function loadTradeifyDesignBrief() {
     );
   } catch {
     cachedDesign = [
-      "# Tradeify HTML Brief Design",
-      "- Client brand: Tradeify.",
-      "- Use the official Tradeify brand direction from https://tradeify.co/.",
-      "- Apply a dark prop-firm executive report style with green and gold accents.",
+      "# Nexus HTML Brief Design",
+      "- Product brand: Nexus.",
+      "- Apply a dark professional report style with active data accents.",
       "- Keep claims grounded in supplied Nexus evidence only.",
     ].join("\n");
   }

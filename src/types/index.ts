@@ -281,6 +281,221 @@ export interface EvidenceSource {
 
 export type VisualizationKind = "kpi" | "table" | "bar" | "line" | "comparison" | "timeline";
 export type BriefStyle = "research_memo" | "ops_report" | "market_dossier";
+export type BriefIntent =
+  | "executive_decision"
+  | "operational_review"
+  | "risk_compliance"
+  | "market_intelligence"
+  | "performance_snapshot"
+  | "action_plan";
+export type BriefDesignTemplate =
+  | "executive_board"
+  | "ops_command"
+  | "risk_compliance";
+
+export type AgentDeliveryOutputKind =
+  | "conversation"
+  | "tool_call"
+  | "plan"
+  | "artifact"
+  | "task_proposal"
+  | "gateway_notification";
+export type AgentDeliveryStatus = "draft" | "pending" | "running" | "approved" | "completed" | "failed" | "dismissed";
+export type ArtifactDeliverableFormat = "html" | "pdf";
+export type AgentBrainRunStatus = "queued" | "running" | "needs_approval" | "completed" | "failed";
+export type AgentBrainStage =
+  | "ingest"
+  | "classify"
+  | "retrieve_context"
+  | "plan"
+  | "execute_tools"
+  | "observe"
+  | "reflect"
+  | "deliver"
+  | "remember";
+export type GatewayChannel = "nexus_chat" | "webhook" | "slack" | "email";
+export type MemoryKind = "working" | "project" | "preference" | "evidence";
+export type GraduatedTrustLevel = 0 | 1 | 2 | 3;
+
+export interface ArtifactDeliveryStage {
+  id: string;
+  event: string;
+  kind: AgentDeliveryOutputKind;
+  label: string;
+  detail: string;
+  status: "running" | "complete" | "error";
+  model?: string;
+  provider?: string;
+  createdAt: string;
+}
+
+export interface PendingArtifactPlan {
+  id: string;
+  sessionId: string;
+  projectId?: string;
+  title: string;
+  prompt: string;
+  markdown: string;
+  status: "draft" | "approved" | "completed" | "failed" | "dismissed";
+  deliverableFormat: ArtifactDeliverableFormat;
+  briefIntent?: BriefIntent;
+  designTemplate?: BriefDesignTemplate;
+  createdAt: string;
+  approvedAt?: string;
+  completedAt?: string;
+  sourceRunId?: string;
+  sourceBrainRunId?: string;
+}
+
+export interface AgentDeliveryOutput {
+  id: string;
+  kind: AgentDeliveryOutputKind;
+  status: AgentDeliveryStatus;
+  title: string;
+  detail?: string;
+  sessionId?: string;
+  projectId?: string;
+  planId?: string;
+  runId?: string;
+  draftId?: string;
+  toolInvocationId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentContextPack {
+  id: string;
+  projectId: string;
+  taskCount: number;
+  openTaskCount: number;
+  datasetCount: number;
+  datasetRowCount: number;
+  contactCount: number;
+  teamCount: number;
+  memoryCount: number;
+  recentRunCount: number;
+  summary: string;
+  createdAt: string;
+}
+
+export interface AgentBrainRun {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  gatewayMessageId?: string;
+  workRunId?: string;
+  title: string;
+  request: string;
+  intent: "conversation" | "brief" | "task_proposal" | "gateway_notification";
+  status: AgentBrainRunStatus;
+  trustLevel: GraduatedTrustLevel;
+  currentStage: AgentBrainStage;
+  contextPackId: string;
+  outputKind?: AgentDeliveryOutputKind;
+  model?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface AgentBrainStep {
+  id: string;
+  runId: string;
+  projectId: string;
+  stage: AgentBrainStage;
+  title: string;
+  detail: string;
+  status: "pending" | "running" | "completed" | "failed";
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface AgentBrainToolCall {
+  id: string;
+  runId: string;
+  projectId: string;
+  toolId: string;
+  toolName: string;
+  risk: "low" | "medium" | "high";
+  status: "queued" | "running" | "success" | "failed" | "blocked";
+  inputSummary: string;
+  outputSummary?: string;
+  approvalId?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface AgentObservation {
+  id: string;
+  runId: string;
+  projectId: string;
+  title: string;
+  body: string;
+  sourceIds: string[];
+  createdAt: string;
+}
+
+export interface AgentApproval {
+  id: string;
+  runId: string;
+  projectId: string;
+  action: string;
+  risk: "low" | "medium" | "high";
+  status: "pending" | "approved" | "rejected" | "expired";
+  reason: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface AgentMemoryItem {
+  id: string;
+  projectId: string;
+  runId?: string;
+  kind: MemoryKind;
+  title: string;
+  body: string;
+  confidence: number;
+  source: "user" | "agent" | "gateway" | "system";
+  pinned?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PermissionGrant {
+  id: string;
+  projectId: string;
+  toolId: string;
+  label: string;
+  trustLevel: GraduatedTrustLevel;
+  status: "available" | "granted" | "revoked" | "requires_approval";
+  risk: "low" | "medium" | "high";
+  reason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GatewayMessage {
+  id: string;
+  projectId: string;
+  channel: GatewayChannel;
+  externalThreadId?: string;
+  sender: string;
+  text: string;
+  status: "received" | "routed" | "failed";
+  runId?: string;
+  createdAt: string;
+}
+
+export interface AgentSkillDefinition {
+  id: string;
+  name: string;
+  description: string;
+  scope: "project" | "workspace" | "gateway";
+  risk: "low" | "medium" | "high";
+  triggerExamples: string[];
+  requiredTools: string[];
+}
 
 export interface DraftSection {
   id: string;
@@ -415,6 +630,12 @@ export interface HtmlBriefArtifact {
   html: string;
   createdAt: string;
   sourceDraftId: string;
+  sourceDraftVersion?: number;
+  briefIntent?: BriefIntent;
+  designTemplate?: BriefDesignTemplate;
+  exportReady?: boolean;
+  deliverableFormat?: ArtifactDeliverableFormat;
+  deliveryStages?: ArtifactDeliveryStage[];
   visualizationCount: number;
   tableCount: number;
   evidenceCount: number;
@@ -424,6 +645,8 @@ export interface DraftArtifact {
   id: string;
   version: number;
   style: BriefStyle;
+  briefIntent?: BriefIntent;
+  designTemplate?: BriefDesignTemplate;
   title: string;
   summary: string;
   thesis: string;
@@ -462,6 +685,9 @@ export interface WorkRun {
   agentRunId?: string;
   domainId?: AgentDomainId;
   datasetIds?: string[];
+  sourcePlanId?: string;
+  approvedPlanMarkdown?: string;
+  deliveryStages?: ArtifactDeliveryStage[];
   title: string;
   request: string;
   phase: WorkLoopPhase;

@@ -71,6 +71,11 @@ chat.post("/", async (c) => {
     composerMode: body.composerMode ?? "auto",
     contextChips: body.contextChips ?? [],
     tasksSummary: body.tasksSummary,
+    contactsSummary: body.contactsSummary,
+    teamSummary: body.teamSummary,
+    datasetsSummary: body.datasetsSummary,
+    memoriesSummary: body.memoriesSummary,
+    recentMessages: body.recentMessages,
   });
 
   const model = useOllama

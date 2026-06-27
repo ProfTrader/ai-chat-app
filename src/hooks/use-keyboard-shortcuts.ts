@@ -21,6 +21,7 @@ export function useKeyboardShortcuts() {
     toggleNav,
     toggleInspector,
     setActiveView,
+    setSidebarMode,
   } = useShellStore();
 
   useEffect(() => {
@@ -57,7 +58,11 @@ export function useKeyboardShortcuts() {
       if (mod && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
         e.preventDefault();
         const views: ViewType[] = ["chat", "briefs", "tasks", "board", "contacts", "timeline", "nodes"];
-        setActiveView(views[Number(e.key) - 1]);
+        const view = views[Number(e.key) - 1];
+        setActiveView(view);
+        if (["briefs", "tasks", "board", "contacts"].includes(view)) {
+          setSidebarMode("projects");
+        }
         return;
       }
 
@@ -75,5 +80,6 @@ export function useKeyboardShortcuts() {
     toggleNav,
     toggleInspector,
     setActiveView,
+    setSidebarMode,
   ]);
 }

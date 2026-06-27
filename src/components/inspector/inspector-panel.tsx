@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/ui/person-avatar";
+import { AgentBrainPanel } from "@/components/inspector/agent-brain-panel";
 import { UserPanel } from "@/components/inspector/user-panel";
 import { findMemberByAssignee } from "@/lib/team-utils";
 import { presenceLabels } from "@/lib/avatars";
@@ -170,14 +171,18 @@ export function InspectorPanel() {
 
   return (
     <div className="flex h-full flex-col bg-pane">
-      <Tabs defaultValue="assignees" className="flex h-full flex-col">
+      <Tabs defaultValue="agent" className="flex h-full flex-col">
         <div className="border-b border-border px-4 pt-4">
           <TabsList variant="line" className="w-full">
+            <TabsTrigger value="agent">Agent</TabsTrigger>
             <TabsTrigger value="assignees">Assignees</TabsTrigger>
             <TabsTrigger value="labels">Labels</TabsTrigger>
             <TabsTrigger value="priority">Priority</TabsTrigger>
           </TabsList>
         </div>
+        <TabsContent value="agent" className="min-h-0 flex-1 p-0">
+          <AgentBrainPanel />
+        </TabsContent>
         <TabsContent value="assignees" className="flex-1 p-5">
           {members.length === 0 ? (
             <>

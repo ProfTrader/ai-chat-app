@@ -1,6 +1,8 @@
 import type {
   AgentActionProposal,
   AuditResult,
+  BriefDesignTemplate,
+  BriefIntent,
   BriefStyle,
   Contact,
   DraftArtifact,
@@ -70,6 +72,30 @@ export function briefStyleLabel(style: BriefStyle) {
     : style === "ops_report"
       ? "Internal ops report"
       : "Research memo";
+}
+
+function detectBriefIntent(prompt: string, style: BriefStyle): BriefIntent {
+  const input = prompt.toLowerCase();
+  if (/(risk|audit|compliance|control|governance|unsupported|assumption|quality|legal)/.test(input)) {
+    return "risk_compliance";
+  }
+  if (style === "ops_report" || /(ops|operation|internal|status|blocker|launch|execution|workflow|queue|staff)/.test(input)) {
+    return "operational_review";
+  }
+  if (style === "market_dossier") return "market_intelligence";
+  if (/(performance|metric|kpi|snapshot|trend|revenue|payout|score)/.test(input)) {
+    return "performance_snapshot";
+  }
+  if (/(action|roadmap|next step|owner|sequence|plan)/.test(input)) {
+    return "action_plan";
+  }
+  return "executive_decision";
+}
+
+function selectDesignTemplate(intent: BriefIntent): BriefDesignTemplate {
+  if (intent === "risk_compliance") return "risk_compliance";
+  if (intent === "operational_review") return "ops_command";
+  return "executive_board";
 }
 
 function buildArtifactSections({
@@ -427,6 +453,8 @@ export function createDraftArtifact({
   const missing = evidence.filter((source) => source.missing);
   const strongEvidence = evidence.filter((source) => source.confidence >= 0.7);
   const styleLabel = briefStyleLabel(style);
+  const briefIntent = detectBriefIntent(plan.objective, style);
+  const designTemplate = selectDesignTemplate(briefIntent);
   const emphasis =
     style === "ops_report"
       ? "operational risk, ownership, and next actions"
@@ -526,6 +554,8 @@ export function createDraftArtifact({
     id: id("draft"),
     version,
     style,
+    briefIntent,
+    designTemplate,
     title,
     summary: `${styleLabel} grounded in ${strongEvidence.length} workspace evidence groups. ${missing.length} data gap${missing.length === 1 ? "" : "s"} remain visible for review.`,
     thesis: `This artifact turns ${plan.objective} into ${emphasis}, then prepares safe agent handoff into tasks, board movement, and roadmap commitments.`,

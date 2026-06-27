@@ -1,12 +1,30 @@
 import { create } from "zustand";
 import type {
   AgentActionProposal,
+  AgentApproval,
+  AgentBrainRun,
+  AgentBrainRunStatus,
+  AgentBrainStage,
+  AgentBrainStep,
+  AgentBrainToolCall,
+  AgentContextPack,
+  AgentDeliveryOutput,
+  AgentDeliveryOutputKind,
   AgentDomainId,
+  AgentMemoryItem,
   AgentMemoryNote,
+  AgentObservation,
   AgentRun,
+  ArtifactDeliveryStage,
   Contact,
   DatasetSemanticRole,
+  GatewayChannel,
+  GatewayMessage,
+  GraduatedTrustLevel,
+  MemoryKind,
   Message,
+  PendingArtifactPlan,
+  PermissionGrant,
   Project,
   ProjectDataset,
   RoadmapItem,
@@ -38,6 +56,11 @@ import {
   type KnowledgePackId,
 } from "@/lib/agents/knowledge-packs";
 import {
+  isBrowserDatabaseAvailable,
+  loadBrowserData,
+  saveBrowserData,
+} from "@/lib/browser-db";
+import {
   applyLocalModelBrief,
   generateBriefWithLocalModel,
   streamBriefWithLocalModel,
@@ -53,10 +76,21 @@ import {
   mockWorkspaces,
 } from "@/lib/mock-data";
 import { enrichContacts, enrichTeamMember } from "@/lib/person-profiles";
+import {
+  buildAgentContextPack,
+  classifyAgentIntent,
+  defaultGatewayChannelLabel,
+  defaultPermissionGrants,
+  domainFromPrompt,
+  memoryKindForText,
+} from "@/lib/agents/brain";
+
+type StorageBackend = "sqlite" | "indexeddb" | "localstorage" | "memory";
 
 interface DataState {
   artifactSchemaVersion: number;
   initialized: boolean;
+  storageBackend: StorageBackend;
   workspaces: Workspace[];
   projects: Project[];
   tasks: Task[];
@@ -67,7 +101,18 @@ interface DataState {
   datasets: ProjectDataset[];
   agentRuns: AgentRun[];
   agentMemoryNotes: AgentMemoryNote[];
+  agentBrainRuns: AgentBrainRun[];
+  agentBrainSteps: AgentBrainStep[];
+  agentBrainToolCalls: AgentBrainToolCall[];
+  agentObservations: AgentObservation[];
+  agentApprovals: AgentApproval[];
+  agentContextPacks: AgentContextPack[];
+  agentMemories: AgentMemoryItem[];
+  permissionGrants: PermissionGrant[];
+  gatewayMessages: GatewayMessage[];
   workRuns: WorkRun[];
+  pendingArtifactPlans: PendingArtifactPlan[];
+  deliveryOutputs: AgentDeliveryOutput[];
   actionProposals: AgentActionProposal[];
   taskActivities: TaskActivity[];
   roadmapItems: RoadmapItem[];
@@ -102,6 +147,62 @@ interface DataState {
     columnKey: string,
     semanticRole?: DatasetSemanticRole,
   ) => void;
+  startAgentBrainRun: (input: {
+    projectId: string;
+    sessionId?: string;
+    request: string;
+    title?: string;
+    gatewayMessageId?: string;
+    intent?: AgentBrainRun["intent"];
+    outputKind?: AgentDeliveryOutputKind;
+    model?: string;
+  }) => AgentBrainRun;
+  advanceAgentBrainRun: (
+    runId: string,
+    stage: AgentBrainStage,
+    title: string,
+    detail: string,
+  ) => AgentBrainStep | null;
+  completeAgentBrainRun: (
+    runId: string,
+    status?: AgentBrainRunStatus,
+    error?: string,
+  ) => void;
+  recordAgentObservation: (
+    runId: string,
+    title: string,
+    body: string,
+    sourceIds?: string[],
+  ) => AgentObservation | null;
+  recordAgentMemory: (input: {
+    projectId: string;
+    runId?: string;
+    title: string;
+    body: string;
+    kind?: MemoryKind;
+    source?: AgentMemoryItem["source"];
+    confidence?: number;
+    pinned?: boolean;
+  }) => AgentMemoryItem;
+  updateAgentMemory: (
+    id: string,
+    patch: Partial<Pick<AgentMemoryItem, "title" | "body" | "kind" | "pinned" | "confidence">>,
+  ) => void;
+  deleteAgentMemory: (id: string) => void;
+  upsertPermissionGrant: (grant: PermissionGrant) => PermissionGrant;
+  updatePermissionGrant: (
+    id: string,
+    status: PermissionGrant["status"],
+    trustLevel?: GraduatedTrustLevel,
+  ) => void;
+  createGatewayMessage: (input: {
+    projectId: string;
+    channel: GatewayChannel;
+    sender: string;
+    text: string;
+    externalThreadId?: string;
+  }) => GatewayMessage;
+  routeGatewayMessage: (messageId: string, runId: string) => void;
   createWorkRunFromPrompt: (prompt: string, projectId?: string) => Promise<WorkRun>;
   createArtifactRunFromPromptStream: (
     prompt: string,
@@ -113,6 +214,11 @@ interface DataState {
     agentRun: AgentRun;
     memoryNotes: AgentMemoryNote[];
   }) => WorkRun;
+  upsertPendingArtifactPlan: (plan: PendingArtifactPlan) => PendingArtifactPlan;
+  approvePendingArtifactPlan: (id: string) => PendingArtifactPlan | null;
+  completePendingArtifactPlan: (id: string, runId: string) => void;
+  failPendingArtifactPlan: (id: string) => void;
+  dismissPendingArtifactPlan: (id: string) => void;
   selectWorkRun: (id: string | null) => void;
   setWorkRunPhase: (id: string, phase: WorkLoopPhase) => void;
   advanceWorkRun: (id: string) => void;
@@ -128,7 +234,41 @@ interface DataState {
   getTeamMembersByProject: (projectId: string) => TeamMember[];
   getDatasetsByProject: (projectId: string) => ProjectDataset[];
   getMessagesBySession: (sessionId: string) => Message[];
+  getBrainRunsByProject: (projectId: string) => AgentBrainRun[];
+  getAgentMemoriesByProject: (projectId: string) => AgentMemoryItem[];
+  getPermissionGrantsByProject: (projectId: string) => PermissionGrant[];
+  getGatewayMessagesByProject: (projectId: string) => GatewayMessage[];
 }
+
+type PersistedDataPayload = {
+  artifactSchemaVersion?: number;
+  workspaces?: Workspace[];
+  projects?: Project[];
+  tasks?: Task[];
+  contacts?: Contact[];
+  sessions?: Session[];
+  messages?: Message[];
+  teamMembers?: TeamMember[];
+  datasets?: ProjectDataset[];
+  agentRuns?: AgentRun[];
+  agentMemoryNotes?: AgentMemoryNote[];
+  agentBrainRuns?: AgentBrainRun[];
+  agentBrainSteps?: AgentBrainStep[];
+  agentBrainToolCalls?: AgentBrainToolCall[];
+  agentObservations?: AgentObservation[];
+  agentApprovals?: AgentApproval[];
+  agentContextPacks?: AgentContextPack[];
+  agentMemories?: AgentMemoryItem[];
+  permissionGrants?: PermissionGrant[];
+  gatewayMessages?: GatewayMessage[];
+  workRuns?: WorkRun[];
+  pendingArtifactPlans?: PendingArtifactPlan[];
+  deliveryOutputs?: AgentDeliveryOutput[];
+  actionProposals?: AgentActionProposal[];
+  taskActivities?: TaskActivity[];
+  roadmapItems?: RoadmapItem[];
+  selectedWorkRunId?: string | null;
+};
 
 type RunDataSnapshot = Pick<
   DataState,
@@ -172,6 +312,83 @@ function hasDatasetShape(dataset: ProjectDataset) {
   return Boolean(dataset.id && Array.isArray(dataset.columns) && Array.isArray(dataset.rows));
 }
 
+function hasPendingPlanShape(plan: PendingArtifactPlan) {
+  return Boolean(plan.id && plan.sessionId && plan.prompt && plan.markdown && plan.status);
+}
+
+function hasDeliveryOutputShape(output: AgentDeliveryOutput) {
+  return Boolean(output.id && output.kind && output.status && output.title);
+}
+
+function hasBrainRunShape(run: AgentBrainRun) {
+  return Boolean(run.id && run.projectId && run.status && run.currentStage && run.contextPackId);
+}
+
+function hasPermissionGrantShape(grant: PermissionGrant) {
+  return Boolean(grant.id && grant.projectId && grant.toolId && grant.status);
+}
+
+function ensurePermissionGrants(
+  projects: Project[],
+  grants: PermissionGrant[] = [],
+) {
+  const now = new Date().toISOString();
+  const byId = new Map(grants.filter(hasPermissionGrantShape).map((grant) => [grant.id, grant]));
+
+  projects.forEach((project) => {
+    defaultPermissionGrants(project.id, now).forEach((grant) => {
+      if (!byId.has(grant.id)) {
+        byId.set(grant.id, grant);
+      }
+    });
+  });
+
+  return Array.from(byId.values());
+}
+
+function stageFromEvent(event: ArtifactStreamEvent, status: ArtifactDeliveryStage["status"] = "complete"): ArtifactDeliveryStage {
+  return {
+    id: generateId("stage"),
+    event: event.event,
+    kind: event.event.includes("tool") ? "tool_call" : "artifact",
+    label: event.data.label ?? event.event.replace(/_/g, " "),
+    detail: event.data.detail ?? "",
+    status: event.event === "artifact_error" ? "error" : status,
+    model: event.data.model,
+    provider: event.data.provider,
+    createdAt: event.at,
+  };
+}
+
+function attachDeliveryStagesToLatestDraft({
+  workRun,
+  stages,
+}: {
+  workRun: WorkRun;
+  stages: ArtifactDeliveryStage[];
+}): WorkRun {
+  const latestDraft = workRun.drafts[workRun.drafts.length - 1];
+  if (!latestDraft?.htmlArtifact) {
+    return { ...workRun, deliveryStages: stages };
+  }
+
+  return {
+    ...workRun,
+    deliveryStages: stages,
+    drafts: [
+      ...workRun.drafts.slice(0, -1),
+      {
+        ...latestDraft,
+        htmlArtifact: {
+          ...latestDraft.htmlArtifact,
+          deliveryStages: stages,
+          exportReady: true,
+        },
+      },
+    ],
+  };
+}
+
 function seedTaskActivities(): TaskActivity[] {
   return mockTasks.slice(0, 5).map((task, index) => ({
     id: generateId("activity"),
@@ -190,11 +407,89 @@ function seedTaskActivities(): TaskActivity[] {
 
 const seedTaskActivityItems = seedTaskActivities();
 const seedRoadmapItems: RoadmapItem[] = [];
-const ARTIFACT_SCHEMA_VERSION = 2;
+const ARTIFACT_SCHEMA_VERSION = 4;
+
+function hydratePersistedData(
+  data: PersistedDataPayload,
+  storageBackend: StorageBackend,
+): Partial<DataState> {
+  const storedRuns =
+    Array.isArray(data.workRuns) && data.workRuns.every(hasCurrentRunShape)
+      ? data.workRuns
+      : [];
+  const pendingArtifactPlans =
+    Array.isArray(data.pendingArtifactPlans) &&
+    data.pendingArtifactPlans.every(hasPendingPlanShape)
+      ? data.pendingArtifactPlans
+      : [];
+  const deliveryOutputs =
+    Array.isArray(data.deliveryOutputs) &&
+    data.deliveryOutputs.every(hasDeliveryOutputShape)
+      ? data.deliveryOutputs
+      : [];
+  const projects = data.projects ?? mockProjects;
+  const permissionGrants = ensurePermissionGrants(
+    projects,
+    Array.isArray(data.permissionGrants) ? data.permissionGrants : [],
+  );
+
+  return {
+    artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
+    initialized: true,
+    storageBackend,
+    workspaces: data.workspaces ?? mockWorkspaces,
+    projects,
+    tasks: data.tasks ?? mockTasks,
+    contacts: enrichContacts(data.contacts ?? mockContacts),
+    sessions: data.sessions ?? mockSessions,
+    messages: data.messages ?? mockMessages,
+    teamMembers: (data.teamMembers ?? mockTeamMembers).map(enrichTeamMember),
+    datasets:
+      Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
+        ? data.datasets
+        : [],
+    agentRuns: Array.isArray(data.agentRuns) ? data.agentRuns : [],
+    agentMemoryNotes: Array.isArray(data.agentMemoryNotes)
+      ? data.agentMemoryNotes
+      : [],
+    agentBrainRuns:
+      Array.isArray(data.agentBrainRuns) && data.agentBrainRuns.every(hasBrainRunShape)
+        ? data.agentBrainRuns
+        : [],
+    agentBrainSteps: Array.isArray(data.agentBrainSteps)
+      ? data.agentBrainSteps
+      : [],
+    agentBrainToolCalls: Array.isArray(data.agentBrainToolCalls)
+      ? data.agentBrainToolCalls
+      : [],
+    agentObservations: Array.isArray(data.agentObservations)
+      ? data.agentObservations
+      : [],
+    agentApprovals: Array.isArray(data.agentApprovals)
+      ? data.agentApprovals
+      : [],
+    agentContextPacks: Array.isArray(data.agentContextPacks)
+      ? data.agentContextPacks
+      : [],
+    agentMemories: Array.isArray(data.agentMemories) ? data.agentMemories : [],
+    permissionGrants,
+    gatewayMessages: Array.isArray(data.gatewayMessages) ? data.gatewayMessages : [],
+    workRuns: storedRuns,
+    pendingArtifactPlans,
+    deliveryOutputs,
+    actionProposals: data.actionProposals ?? [],
+    taskActivities: data.taskActivities ?? seedTaskActivityItems,
+    roadmapItems: data.roadmapItems ?? seedRoadmapItems,
+    selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
+      ? data.selectedWorkRunId!
+      : storedRuns[0]?.id ?? null,
+  };
+}
 
 export const useDataStore = create<DataState>((set, get) => ({
   artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
   initialized: false,
+  storageBackend: "memory",
   workspaces: mockWorkspaces,
   projects: mockProjects,
   tasks: mockTasks,
@@ -205,7 +500,18 @@ export const useDataStore = create<DataState>((set, get) => ({
   datasets: [],
   agentRuns: [],
   agentMemoryNotes: [],
+  agentBrainRuns: [],
+  agentBrainSteps: [],
+  agentBrainToolCalls: [],
+  agentObservations: [],
+  agentApprovals: [],
+  agentContextPacks: [],
+  agentMemories: [],
+  permissionGrants: ensurePermissionGrants(mockProjects, []),
+  gatewayMessages: [],
   workRuns: [],
+  pendingArtifactPlans: [],
+  deliveryOutputs: [],
   actionProposals: [],
   taskActivities: seedTaskActivityItems,
   roadmapItems: seedRoadmapItems,
@@ -221,60 +527,57 @@ export const useDataStore = create<DataState>((set, get) => ({
         await initDatabase();
         const data = await loadAllData();
         if (data.tasks.length > 0) {
-          set({ ...data, initialized: true });
+          set({ ...data, storageBackend: "sqlite", initialized: true });
           return;
         }
         const { seedDatabase } = await import("@/lib/db");
         await seedDatabase();
         const seeded = await loadAllData();
-        set({ ...seeded, initialized: true });
+        set({ ...seeded, storageBackend: "sqlite", initialized: true });
         return;
       } catch (err) {
         console.warn("SQLite unavailable, using in-memory data:", err);
       }
     }
 
-    const stored = localStorage.getItem("crm-data");
-    if (stored) {
+    let browserDatabaseAvailable = isBrowserDatabaseAvailable();
+    let storedData: PersistedDataPayload | null = null;
+    let storageBackend: StorageBackend = browserDatabaseAvailable
+      ? "indexeddb"
+      : "localstorage";
+
+    if (browserDatabaseAvailable) {
       try {
-        const data = JSON.parse(stored) as Partial<DataState>;
-        const resetArtifacts = data.artifactSchemaVersion !== ARTIFACT_SCHEMA_VERSION;
-        const storedRuns =
-          !resetArtifacts && Array.isArray(data.workRuns) && data.workRuns.every(hasCurrentRunShape)
-            ? data.workRuns
-            : [];
-        set({
-          artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
-          workspaces: data.workspaces ?? mockWorkspaces,
-          projects: data.projects ?? mockProjects,
-          tasks: data.tasks ?? mockTasks,
-          contacts: enrichContacts(data.contacts ?? mockContacts),
-          sessions: data.sessions ?? mockSessions,
-          messages: data.messages ?? mockMessages,
-          teamMembers: mockTeamMembers,
-          datasets:
-            Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
-              ? data.datasets
-              : [],
-          agentRuns: !resetArtifacts && Array.isArray(data.agentRuns) ? data.agentRuns : [],
-          agentMemoryNotes: !resetArtifacts && Array.isArray(data.agentMemoryNotes) ? data.agentMemoryNotes : [],
-          workRuns: storedRuns,
-          actionProposals: !resetArtifacts ? data.actionProposals ?? [] : [],
-          taskActivities: data.taskActivities ?? seedTaskActivityItems,
-          roadmapItems: !resetArtifacts ? data.roadmapItems ?? seedRoadmapItems : seedRoadmapItems,
-          selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
-            ? data.selectedWorkRunId!
-            : storedRuns[0]?.id ?? null,
-          initialized: true,
-        });
-        persistLocal(get());
-        return;
-      } catch {
-        // fall through
+        storedData = await loadBrowserData<PersistedDataPayload>();
+      } catch (err) {
+        browserDatabaseAvailable = false;
+        storageBackend = "localstorage";
+        console.warn("IndexedDB unavailable, using localStorage backup:", err);
       }
     }
 
-    set({ initialized: true });
+    if (!storedData && typeof window !== "undefined") {
+      const stored = window.localStorage.getItem("crm-data");
+      if (stored) {
+        try {
+          storedData = JSON.parse(stored) as PersistedDataPayload;
+        } catch {
+          storedData = null;
+        }
+      }
+    }
+
+    if (storedData) {
+      set(hydratePersistedData(storedData, storageBackend));
+      persistLocal(get());
+      return;
+    }
+
+    set({
+      storageBackend: browserDatabaseAvailable ? "indexeddb" : "localstorage",
+      initialized: true,
+    });
+    persistLocal(get());
   },
 
   addTask: async (input) => {
@@ -433,13 +736,20 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   addProject: async (name, workspaceId) => {
+    const now = new Date().toISOString();
     const project: Project = {
       id: generateId("proj"),
       workspaceId,
       name,
       slug: name.toLowerCase().replace(/\s+/g, "-"),
     };
-    set({ projects: [...get().projects, project] });
+    set({
+      projects: [...get().projects, project],
+      permissionGrants: [
+        ...get().permissionGrants,
+        ...defaultPermissionGrants(project.id, now),
+      ],
+    });
     persistLocal(get());
     return project;
   },
@@ -477,6 +787,336 @@ export const useDataStore = create<DataState>((set, get) => ({
               updatedAt: new Date().toISOString(),
             }
           : dataset,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  startAgentBrainRun: (input) => {
+    const state = get();
+    const now = new Date().toISOString();
+    const projectId = input.projectId;
+    const intent = input.intent ?? classifyAgentIntent(input.request);
+    const domainId = domainFromPrompt(input.request);
+    const outputKind =
+      input.outputKind ??
+      (intent === "brief"
+        ? "plan"
+        : intent === "task_proposal"
+          ? "task_proposal"
+          : intent === "gateway_notification"
+            ? "gateway_notification"
+            : "conversation");
+    const contextPack = buildAgentContextPack({
+      projectId,
+      tasks: state.tasks.filter((task) => task.projectId === projectId),
+      datasets: state.datasets.filter((dataset) => dataset.projectId === projectId),
+      contacts: state.contacts.filter((contact) => contact.projectId === projectId),
+      teamMembers: state.teamMembers.filter((member) => member.projectId === projectId),
+      memories: state.agentMemories.filter((memory) => memory.projectId === projectId),
+      workRuns: state.workRuns.filter((run) => run.projectId === projectId).slice(0, 5),
+    });
+    const run: AgentBrainRun = {
+      id: generateId("brain-run"),
+      projectId,
+      sessionId: input.sessionId,
+      gatewayMessageId: input.gatewayMessageId,
+      title: input.title ?? `${intent.replace(/_/g, " ")} run`,
+      request: input.request,
+      intent,
+      status: "running",
+      trustLevel: 0,
+      currentStage: "retrieve_context",
+      contextPackId: contextPack.id,
+      outputKind,
+      model: input.model,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const steps: AgentBrainStep[] = [
+      {
+        id: generateId("brain-step"),
+        runId: run.id,
+        projectId,
+        stage: "ingest",
+        title: "Request received",
+        detail: input.gatewayMessageId
+          ? "Gateway message normalized into a Nexus agent run."
+          : "Chat request normalized into a Nexus agent run.",
+        status: "completed",
+        createdAt: now,
+        completedAt: now,
+      },
+      {
+        id: generateId("brain-step"),
+        runId: run.id,
+        projectId,
+        stage: "classify",
+        title: "Intent classified",
+        detail: `Intent: ${intent.replace(/_/g, " ")}. Domain signal: ${domainId.replace(/_/g, " ")}.`,
+        status: "completed",
+        createdAt: now,
+        completedAt: now,
+      },
+      {
+        id: generateId("brain-step"),
+        runId: run.id,
+        projectId,
+        stage: "retrieve_context",
+        title: "Project context retrieved",
+        detail: contextPack.summary,
+        status: "completed",
+        createdAt: now,
+        completedAt: now,
+      },
+    ];
+    const toolCall: AgentBrainToolCall = {
+      id: generateId("brain-tool"),
+      runId: run.id,
+      projectId,
+      toolId: "inspect_project_context",
+      toolName: "Inspect project context",
+      risk: "low",
+      status: "success",
+      inputSummary: "Collect project chat, tasks, board, briefs, people, datasets, and memory.",
+      outputSummary: contextPack.summary,
+      createdAt: now,
+      completedAt: now,
+    };
+    const observation: AgentObservation = {
+      id: generateId("observation"),
+      runId: run.id,
+      projectId,
+      title: "Context pack ready",
+      body: contextPack.summary,
+      sourceIds: [contextPack.id],
+      createdAt: now,
+    };
+    const output: AgentDeliveryOutput = {
+      id: `delivery-${run.id}`,
+      kind: outputKind,
+      status: "running",
+      title: run.title,
+      detail: contextPack.summary,
+      sessionId: input.sessionId,
+      projectId,
+      runId: run.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    set({
+      agentContextPacks: [contextPack, ...state.agentContextPacks],
+      agentBrainRuns: [run, ...state.agentBrainRuns],
+      agentBrainSteps: [...steps, ...state.agentBrainSteps],
+      agentBrainToolCalls: [toolCall, ...state.agentBrainToolCalls],
+      agentObservations: [observation, ...state.agentObservations],
+      permissionGrants: ensurePermissionGrants(state.projects, state.permissionGrants),
+      deliveryOutputs: [output, ...state.deliveryOutputs.filter((item) => item.id !== output.id)],
+      gatewayMessages: input.gatewayMessageId
+        ? state.gatewayMessages.map((message) =>
+            message.id === input.gatewayMessageId
+              ? { ...message, status: "routed", runId: run.id }
+              : message,
+          )
+        : state.gatewayMessages,
+    });
+    persistLocal(get());
+    return run;
+  },
+
+  advanceAgentBrainRun: (runId, stage, title, detail) => {
+    const state = get();
+    const run = state.agentBrainRuns.find((item) => item.id === runId);
+    if (!run) return null;
+
+    const now = new Date().toISOString();
+    const step: AgentBrainStep = {
+      id: generateId("brain-step"),
+      runId,
+      projectId: run.projectId,
+      stage,
+      title,
+      detail,
+      status: "completed",
+      createdAt: now,
+      completedAt: now,
+    };
+
+    set({
+      agentBrainRuns: state.agentBrainRuns.map((item) =>
+        item.id === runId
+          ? { ...item, currentStage: stage, status: "running", updatedAt: now }
+          : item,
+      ),
+      agentBrainSteps: [...state.agentBrainSteps, step],
+      deliveryOutputs: state.deliveryOutputs.map((output) =>
+        output.runId === runId ? { ...output, status: "running", updatedAt: now } : output,
+      ),
+    });
+    persistLocal(get());
+    return step;
+  },
+
+  completeAgentBrainRun: (runId, status = "completed", error) => {
+    const state = get();
+    const now = new Date().toISOString();
+    const run = state.agentBrainRuns.find((item) => item.id === runId);
+    const outputStatus: AgentDeliveryOutput["status"] =
+      status === "completed"
+        ? "completed"
+        : status === "failed"
+          ? "failed"
+          : status === "needs_approval"
+            ? "pending"
+            : "running";
+    const approval: AgentApproval | null =
+      status === "needs_approval" && run
+        ? {
+            id: generateId("approval"),
+            runId,
+            projectId: run.projectId,
+            action:
+              run.outputKind === "artifact" || run.intent === "brief"
+                ? "Approve artifact production"
+                : "Approve proposed action",
+            risk: run.outputKind === "artifact" || run.intent === "brief" ? "medium" : "low",
+            status: "pending",
+            reason: "Graduated trust requires a user decision before Nexus applies or produces this output.",
+            createdAt: now,
+          }
+        : null;
+
+    set({
+      agentBrainRuns: state.agentBrainRuns.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              status,
+              error,
+              updatedAt: now,
+              completedAt: status === "completed" || status === "failed" ? now : run.completedAt,
+            }
+          : run,
+      ),
+      deliveryOutputs: state.deliveryOutputs.map((output) =>
+        output.runId === runId ? { ...output, status: outputStatus, updatedAt: now } : output,
+      ),
+      agentApprovals: approval
+        ? [
+            approval,
+            ...state.agentApprovals.filter(
+              (item) => !(item.runId === approval.runId && item.status === "pending"),
+            ),
+          ]
+        : state.agentApprovals,
+    });
+    persistLocal(get());
+  },
+
+  recordAgentObservation: (runId, title, body, sourceIds = []) => {
+    const run = get().agentBrainRuns.find((item) => item.id === runId);
+    if (!run) return null;
+    const observation: AgentObservation = {
+      id: generateId("observation"),
+      runId,
+      projectId: run.projectId,
+      title,
+      body,
+      sourceIds,
+      createdAt: new Date().toISOString(),
+    };
+    set({ agentObservations: [observation, ...get().agentObservations] });
+    persistLocal(get());
+    return observation;
+  },
+
+  recordAgentMemory: (input) => {
+    const now = new Date().toISOString();
+    const memory: AgentMemoryItem = {
+      id: generateId("memory"),
+      projectId: input.projectId,
+      runId: input.runId,
+      kind: input.kind ?? memoryKindForText(`${input.title} ${input.body}`),
+      title: input.title,
+      body: input.body,
+      confidence: input.confidence ?? 0.7,
+      source: input.source ?? "agent",
+      pinned: input.pinned,
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ agentMemories: [memory, ...get().agentMemories] });
+    persistLocal(get());
+    return memory;
+  },
+
+  updateAgentMemory: (id, patch) => {
+    const now = new Date().toISOString();
+    set({
+      agentMemories: get().agentMemories.map((memory) =>
+        memory.id === id ? { ...memory, ...patch, updatedAt: now } : memory,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  deleteAgentMemory: (id) => {
+    set({ agentMemories: get().agentMemories.filter((memory) => memory.id !== id) });
+    persistLocal(get());
+  },
+
+  upsertPermissionGrant: (grant) => {
+    const now = new Date().toISOString();
+    const nextGrant = { ...grant, updatedAt: now };
+    set({
+      permissionGrants: [
+        nextGrant,
+        ...get().permissionGrants.filter((item) => item.id !== grant.id),
+      ],
+    });
+    persistLocal(get());
+    return nextGrant;
+  },
+
+  updatePermissionGrant: (id, status, trustLevel) => {
+    const now = new Date().toISOString();
+    set({
+      permissionGrants: get().permissionGrants.map((grant) =>
+        grant.id === id
+          ? {
+              ...grant,
+              status,
+              trustLevel: trustLevel ?? grant.trustLevel,
+              updatedAt: now,
+            }
+          : grant,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  createGatewayMessage: (input) => {
+    const channelLabel = defaultGatewayChannelLabel(input.channel);
+    const message: GatewayMessage = {
+      id: generateId("gateway"),
+      projectId: input.projectId,
+      channel: input.channel,
+      externalThreadId: input.externalThreadId,
+      sender: input.sender || channelLabel,
+      text: input.text,
+      status: "received",
+      createdAt: new Date().toISOString(),
+    };
+    set({ gatewayMessages: [message, ...get().gatewayMessages] });
+    persistLocal(get());
+    return message;
+  },
+
+  routeGatewayMessage: (messageId, runId) => {
+    set({
+      gatewayMessages: get().gatewayMessages.map((message) =>
+        message.id === messageId ? { ...message, status: "routed", runId } : message,
       ),
     });
     persistLocal(get());
@@ -544,55 +1184,189 @@ export const useDataStore = create<DataState>((set, get) => ({
     return workRun;
   },
 
+  upsertPendingArtifactPlan: (plan) => {
+    const current = get();
+    const output: AgentDeliveryOutput = {
+      id: `delivery-${plan.id}`,
+      kind: "plan",
+      status: plan.status === "draft" ? "draft" : plan.status,
+      title: plan.title,
+      detail: "Brief artifact plan",
+      sessionId: plan.sessionId,
+      projectId: plan.projectId,
+      planId: plan.id,
+      runId: plan.sourceRunId,
+      createdAt: plan.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    set({
+      pendingArtifactPlans: [
+        plan,
+        ...current.pendingArtifactPlans.filter((item) => item.id !== plan.id),
+      ],
+      deliveryOutputs: [
+        output,
+        ...current.deliveryOutputs.filter((item) => item.id !== output.id),
+      ],
+    });
+    persistLocal(get());
+    return plan;
+  },
+
+  approvePendingArtifactPlan: (id) => {
+    const now = new Date().toISOString();
+    const currentPlan = get().pendingArtifactPlans.find((plan) => plan.id === id);
+    const approved: PendingArtifactPlan | null = currentPlan
+      ? { ...currentPlan, status: "approved", approvedAt: now }
+      : null;
+    set({
+      pendingArtifactPlans: get().pendingArtifactPlans.map((plan) =>
+        plan.id === id && approved ? approved : plan,
+      ),
+      deliveryOutputs: get().deliveryOutputs.map((output) =>
+        output.planId === id
+          ? { ...output, status: "approved", updatedAt: now }
+          : output,
+      ),
+    });
+    if (approved?.sourceBrainRunId) {
+      set({
+        agentApprovals: get().agentApprovals.map((approval) =>
+          approval.runId === approved?.sourceBrainRunId && approval.status === "pending"
+            ? { ...approval, status: "approved", resolvedAt: now }
+            : approval,
+        ),
+      });
+    }
+    persistLocal(get());
+    return approved;
+  },
+
+  completePendingArtifactPlan: (id, runId) => {
+    const now = new Date().toISOString();
+    set({
+      pendingArtifactPlans: get().pendingArtifactPlans.map((plan) =>
+        plan.id === id
+          ? { ...plan, status: "completed", completedAt: now, sourceRunId: runId }
+          : plan,
+      ),
+      deliveryOutputs: get().deliveryOutputs.map((output) =>
+        output.planId === id
+          ? { ...output, status: "completed", runId, updatedAt: now }
+          : output,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  failPendingArtifactPlan: (id) => {
+    const now = new Date().toISOString();
+    set({
+      pendingArtifactPlans: get().pendingArtifactPlans.map((plan) =>
+        plan.id === id ? { ...plan, status: "failed" } : plan,
+      ),
+      deliveryOutputs: get().deliveryOutputs.map((output) =>
+        output.planId === id ? { ...output, status: "failed", updatedAt: now } : output,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  dismissPendingArtifactPlan: (id) => {
+    const now = new Date().toISOString();
+    set({
+      pendingArtifactPlans: get().pendingArtifactPlans.map((plan) =>
+        plan.id === id ? { ...plan, status: "dismissed" } : plan,
+      ),
+      deliveryOutputs: get().deliveryOutputs.map((output) =>
+        output.planId === id ? { ...output, status: "completed", updatedAt: now } : output,
+      ),
+    });
+    persistLocal(get());
+  },
+
   createArtifactRunFromPromptStream: async (prompt, projectId, onEvent) => {
     const state = get();
     const targetProjectId = projectId ?? state.projects[0]?.id ?? "proj-1";
+    const stageHistory: ArtifactDeliveryStage[] = [];
+    const forwardEvent = (event: ArtifactStreamEvent, status: ArtifactDeliveryStage["status"] = "complete") => {
+      stageHistory.push(stageFromEvent(event, status));
+      onEvent?.(event);
+    };
+    forwardEvent({
+      event: "plan_locked",
+      at: new Date().toISOString(),
+      data: {
+        label: "Planning locked",
+        detail: "Approved plan is locked and production can start.",
+      },
+    });
     const context = buildRunContext(targetProjectId, state);
     const { workRun, agentRun, memoryNotes } = runBusinessIntelligenceAgent({
       prompt,
       ...context,
       datasets: state.datasets.filter((dataset) => dataset.projectId === targetProjectId),
     });
+    forwardEvent({
+      event: "evidence_inspected",
+      at: new Date().toISOString(),
+      data: {
+        label: "Evidence inspected",
+        detail: `${workRun.evidence.length} evidence groups and ${agentRun.toolInvocations.length} tool traces are available for the artifact.`,
+        model: agentRun.model,
+      },
+    });
 
-    const brief = await streamBriefWithLocalModel({ workRun, agentRun, onEvent });
+    const brief = await streamBriefWithLocalModel({ workRun, agentRun, onEvent: forwardEvent });
     const emitHtmlStage = (event: ArtifactStreamEvent["event"], label: string, detail: string) => {
-      onEvent?.({
+      forwardEvent({
         event,
         at: new Date().toISOString(),
         data: { label, detail, model: agentRun.model },
       });
     };
     emitHtmlStage(
-      "html_scaffolded",
-      "HTML scaffold",
-      "Creating the standalone document shell, layout, and responsive report structure.",
-    );
-    emitHtmlStage(
-      "html_design_applied",
-      "Tradeify design applied",
-      "Applying design.md, the official Tradeify logo treatment, dark report surfaces, and green/gold data accents.",
+      "narrative_drafted",
+      "Narrative drafted",
+      brief.used
+        ? "Model-written narrative has been merged into the deterministic evidence structure."
+        : "Using deterministic fallback narrative because the configured model did not return a usable brief.",
     );
     const generated = applyLocalModelBrief({ workRun, agentRun, brief });
     const generatedDraft = generated.workRun.drafts[generated.workRun.drafts.length - 1];
     emitHtmlStage(
-      "html_visuals_rendered",
-      "Visual blocks rendered",
+      "design_applied",
+      "Design applied",
+      `Applied the ${generatedDraft?.designTemplate?.replace(/_/g, " ") ?? "selected"} brief template and standalone HTML styling.`,
+    );
+    emitHtmlStage(
+      "claims_audited",
+      "Claims audited",
+      `Audit score is ${generated.workRun.audit.score}/100 with ${generated.workRun.audit.failedChecks.length} failed checks.`,
+    );
+    emitHtmlStage(
+      "html_rendered",
+      "HTML rendered",
       `${generatedDraft?.htmlArtifact?.visualizationCount ?? 0} visual blocks and ${generatedDraft?.htmlArtifact?.tableCount ?? 0} tables were embedded in the HTML file.`,
     );
     emitHtmlStage(
       "html_evidence_attached",
-      "Evidence appendix attached",
+      "Evidence attached",
       `${generatedDraft?.htmlArtifact?.evidenceCount ?? generated.workRun.evidence.length} evidence sources and source URLs were added to the appendix.`,
     );
     emitHtmlStage(
-      "html_finalized",
-      "HTML file finalized",
+      "export_ready",
+      "Export ready",
       generatedDraft?.htmlArtifact?.fileName
         ? `Final artifact file: ${generatedDraft.htmlArtifact.fileName}.`
         : "Final artifact file is ready.",
     );
-    return get().commitArtifactRun({
+    const stagedWorkRun = attachDeliveryStagesToLatestDraft({
       workRun: generated.workRun,
+      stages: stageHistory,
+    });
+    return get().commitArtifactRun({
+      workRun: stagedWorkRun,
       agentRun: generated.agentRun,
       memoryNotes,
     });
@@ -790,6 +1564,24 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   getMessagesBySession: (sessionId) =>
     get().messages.filter((m) => m.sessionId === sessionId),
+
+  getBrainRunsByProject: (projectId) =>
+    get()
+      .agentBrainRuns.filter((run) => run.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+
+  getAgentMemoriesByProject: (projectId) =>
+    get()
+      .agentMemories.filter((memory) => memory.projectId === projectId)
+      .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)),
+
+  getPermissionGrantsByProject: (projectId) =>
+    get().permissionGrants.filter((grant) => grant.projectId === projectId),
+
+  getGatewayMessagesByProject: (projectId) =>
+    get()
+      .gatewayMessages.filter((message) => message.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
 }));
 
 function persistLocal(state: DataState) {
@@ -801,14 +1593,37 @@ function persistLocal(state: DataState) {
     contacts: state.contacts,
     sessions: state.sessions,
     messages: state.messages,
+    teamMembers: state.teamMembers,
     datasets: state.datasets,
     agentRuns: state.agentRuns,
     agentMemoryNotes: state.agentMemoryNotes,
+    agentBrainRuns: state.agentBrainRuns,
+    agentBrainSteps: state.agentBrainSteps,
+    agentBrainToolCalls: state.agentBrainToolCalls,
+    agentObservations: state.agentObservations,
+    agentApprovals: state.agentApprovals,
+    agentContextPacks: state.agentContextPacks,
+    agentMemories: state.agentMemories,
+    permissionGrants: state.permissionGrants,
+    gatewayMessages: state.gatewayMessages,
     workRuns: state.workRuns,
+    pendingArtifactPlans: state.pendingArtifactPlans,
+    deliveryOutputs: state.deliveryOutputs,
     actionProposals: state.actionProposals,
     taskActivities: state.taskActivities,
     roadmapItems: state.roadmapItems,
     selectedWorkRunId: state.selectedWorkRunId,
   };
-  localStorage.setItem("crm-data", JSON.stringify(payload));
+
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem("crm-data", JSON.stringify(payload));
+    } catch (err) {
+      console.warn("Failed to write localStorage backup:", err);
+    }
+  }
+
+  void saveBrowserData(payload).catch((err) => {
+    console.warn("Failed to persist browser database state:", err);
+  });
 }

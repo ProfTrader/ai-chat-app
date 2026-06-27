@@ -2,6 +2,8 @@ import type {
   AgentRun,
   ArtifactBlock,
   ArtifactClaim,
+  BriefDesignTemplate,
+  BriefIntent,
   DraftArtifact,
   EvidenceSource,
   WorkRun,
@@ -34,6 +36,8 @@ interface AgentBriefResponse {
   provider?: "ollama" | "moonshot";
   model?: string;
   title?: string;
+  briefIntent?: BriefIntent;
+  designTemplate?: BriefDesignTemplate;
   executiveSummary?: string;
   thesis?: string;
   takeaways?: string[];
@@ -45,17 +49,24 @@ interface AgentBriefResponse {
 }
 
 export type ArtifactStreamEventName =
+  | "plan_locked"
+  | "evidence_inspected"
   | "understanding_request"
   | "retrieving_context"
   | "inspecting_evidence"
   | "design_brief_loaded"
   | "drafting_html_artifact"
   | "auditing_artifact"
+  | "narrative_drafted"
+  | "design_applied"
+  | "claims_audited"
+  | "html_rendered"
   | "html_scaffolded"
   | "html_design_applied"
   | "html_visuals_rendered"
   | "html_evidence_attached"
   | "html_finalized"
+  | "export_ready"
   | "artifact_created"
   | "artifact_error";
 
@@ -66,6 +77,7 @@ export interface ArtifactStreamEvent {
     label?: string;
     detail?: string;
     model?: string;
+    provider?: string;
     brief?: AgentBriefResponse;
   };
 }
@@ -327,6 +339,8 @@ function mergeBriefDraft({
   return {
     ...draft,
     title: brief.title ?? draft.title,
+    briefIntent: brief.briefIntent ?? draft.briefIntent,
+    designTemplate: brief.designTemplate ?? draft.designTemplate,
     summary: brief.executiveSummary,
     thesis: brief.thesis,
     findings: claims?.map((claim) => claim.claim) ?? draft.findings,
