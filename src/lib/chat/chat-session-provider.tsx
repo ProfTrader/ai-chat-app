@@ -346,6 +346,7 @@ export function ChatSessionProvider({
   const { composerMode } = useChatStore();
   const { status: authStatus } = useAuthStore();
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
+  const setAgentWorking = useShellStore((s) => s.setAgentWorking);
   const [activities, setActivities] = useState<ChatActivity[]>([]);
   const [artifactBusy, setArtifactBusy] = useState(false);
   const activeBrainRunIdRef = useRef<string | null>(null);
@@ -484,12 +485,23 @@ export function ChatSessionProvider({
     onData: (part) => {
       if (part.type !== "data-activity") return;
       const activity = normalizeActivity(part);
-      setActivities((current) => [
-        ...current.filter((item) => item.id !== activity.id),
-        activity,
-      ]);
+      setActivities((current) => {
+        const next = current.filter((item) => {
+          if (item.id === activity.id) return false;
+          if (
+            activity.status !== "running" &&
+            item.status === "running" &&
+            item.toolName === activity.toolName
+          ) {
+            return false;
+          }
+          return true;
+        });
+        return [...next, activity];
+      });
     },
     onError: (error) => {
+      setActivities([]);
       const runId = activeBrainRunIdRef.current;
       if (runId) {
         completeAgentBrainRun(runId, "failed", error.message || "Chat stream failed.");
@@ -504,6 +516,7 @@ export function ChatSessionProvider({
       toast.error(error.message || "Failed to send message.");
     },
     onFinish: ({ message }) => {
+      setActivities([]);
       if (!sessionId || message.role !== "assistant") return;
       const content = uiMessageToText(message);
       void persistChatMessage(sessionId, content, "assistant", message.id);
@@ -526,6 +539,17 @@ export function ChatSessionProvider({
       }
     },
   });
+
+  useEffect(() => {
+    const running =
+      artifactBusy ||
+      chat.status === "submitted" ||
+      chat.status === "streaming" ||
+      activities.some((activity) => activity.status === "running");
+    setAgentWorking(running);
+
+    return () => setAgentWorking(false);
+  }, [activities, artifactBusy, chat.status, setAgentWorking]);
 
   useEffect(() => {
     if (!sessionId) {

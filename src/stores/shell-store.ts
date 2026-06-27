@@ -28,6 +28,9 @@ interface ShellState {
   shortcutsOpen: boolean;
   settingsOpen: boolean;
   profileOpen: boolean;
+  agentWorking: boolean;
+  notificationsInitializedAt: string | null;
+  notificationReadAt: Record<string, string>;
   navPanelSize: number;
   inspectorPanelSize: number;
   setNavCollapsed: (collapsed: boolean) => void;
@@ -40,6 +43,10 @@ interface ShellState {
   setShortcutsOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setProfileOpen: (open: boolean) => void;
+  setAgentWorking: (working: boolean) => void;
+  initializeNotifications: (at: string) => void;
+  markNotificationRead: (key: string, at?: string) => void;
+  markNotificationReads: (keys: string[], at?: string) => void;
   setNavPanelSize: (size: number) => void;
   setInspectorPanelSize: (size: number) => void;
 }
@@ -55,6 +62,9 @@ export const useShellStore = create<ShellState>()(
       shortcutsOpen: false,
       settingsOpen: false,
       profileOpen: false,
+      agentWorking: false,
+      notificationsInitializedAt: null,
+      notificationReadAt: {},
       navPanelSize: NAV_PANEL_DEFAULT,
       inspectorPanelSize: INSPECTOR_PANEL_DEFAULT,
       setNavCollapsed: (navCollapsed) => set({ navCollapsed }),
@@ -67,6 +77,32 @@ export const useShellStore = create<ShellState>()(
       setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setProfileOpen: (profileOpen) => set({ profileOpen }),
+      setAgentWorking: (agentWorking) => set({ agentWorking }),
+      initializeNotifications: (at) =>
+        set((state) =>
+          state.notificationsInitializedAt
+            ? state
+            : {
+                notificationsInitializedAt: at,
+                notificationReadAt: state.notificationReadAt,
+              },
+        ),
+      markNotificationRead: (key, at = new Date().toISOString()) =>
+        set((state) => ({
+          notificationReadAt: {
+            ...state.notificationReadAt,
+            [key]: at,
+          },
+        })),
+      markNotificationReads: (keys, at = new Date().toISOString()) =>
+        set((state) => {
+          if (keys.length === 0) return state;
+          const nextReadAt = { ...state.notificationReadAt };
+          keys.forEach((key) => {
+            nextReadAt[key] = at;
+          });
+          return { notificationReadAt: nextReadAt };
+        }),
       setNavPanelSize: (navPanelSize) => set({ navPanelSize: normalizeNavPanelSize(navPanelSize) }),
       setInspectorPanelSize: (inspectorPanelSize) =>
         set({ inspectorPanelSize: normalizeInspectorPanelSize(inspectorPanelSize) }),
@@ -78,6 +114,9 @@ export const useShellStore = create<ShellState>()(
         return {
           ...current,
           ...saved,
+          notificationReadAt: saved?.notificationReadAt ?? current.notificationReadAt,
+          notificationsInitializedAt:
+            saved?.notificationsInitializedAt ?? current.notificationsInitializedAt,
           navPanelSize: normalizeNavPanelSize(saved?.navPanelSize ?? current.navPanelSize),
           inspectorPanelSize: normalizeInspectorPanelSize(
             saved?.inspectorPanelSize ?? current.inspectorPanelSize,
@@ -89,6 +128,8 @@ export const useShellStore = create<ShellState>()(
         inspectorCollapsed: state.inspectorCollapsed,
         sidebarMode: state.sidebarMode,
         activeView: state.activeView,
+        notificationReadAt: state.notificationReadAt,
+        notificationsInitializedAt: state.notificationsInitializedAt,
         navPanelSize: state.navPanelSize,
         inspectorPanelSize: state.inspectorPanelSize,
       }),

@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
@@ -11,7 +11,6 @@ import {
   MessageAvatar,
   MessageContent,
   MessageFooter,
-  MessageHeader,
 } from "@/components/ui/message";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -40,7 +39,7 @@ function StreamingStatus({ label }: { label: string }) {
       <MarkerIcon>
         <Spinner role="presentation" aria-hidden="true" className="text-active" />
       </MarkerIcon>
-      <MarkerContent className="shimmer">{label}</MarkerContent>
+      <MarkerContent className="shimmer shimmer-duration-1000">{label}</MarkerContent>
     </Marker>
   );
 }
@@ -118,7 +117,7 @@ function ProductionStream({
                 <Check className="text-active" />
               )}
             </MarkerIcon>
-            <MarkerContent className={cn(isActive && "shimmer")}>
+            <MarkerContent className={cn(isActive && "shimmer shimmer-duration-1000")}>
               {stream.current}
             </MarkerContent>
           </Marker>
@@ -144,9 +143,14 @@ function ProductionStream({
 interface ChatMessageProps {
   message: UIMessage;
   isStreaming?: boolean;
+  showStreamingStatus?: boolean;
 }
 
-export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export function ChatMessage({
+  message,
+  isStreaming,
+  showStreamingStatus = true,
+}: ChatMessageProps) {
   const isUser = message.role === "user";
   const text = getMessageText(message);
   const { runId, cleanText } = parseViewBriefMarker(text);
@@ -165,59 +169,55 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   };
 
   return (
-    <Message align={isUser ? "end" : "start"} className="items-end">
-      <MessageAvatar
-        className={cn(
-          "bg-transparent",
-          isUser ? "opacity-80" : "opacity-100",
-        )}
-      >
+    <Message align={isUser ? "end" : "start"}>
+      <MessageAvatar className="bg-transparent">
         <Avatar size="sm" className={isUser ? "bg-muted" : "bg-primary/10"}>
           <AvatarFallback className={cn(isUser ? "bg-muted" : "bg-primary/10 text-active")}>
-            {isUser ? "Y" : "DX"}
+            {isUser ? "ME" : "DX"}
           </AvatarFallback>
         </Avatar>
       </MessageAvatar>
       <MessageContent
         className={cn(
-          "max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5",
+          "max-w-[min(42rem,calc(100%-2.5rem))]",
           isUser ? "items-end" : "items-start",
         )}
       >
-        <MessageHeader className={cn("px-1", isUser && "justify-end")}>
-          <span>{isUser ? "You" : "Dexter"}</span>
-        </MessageHeader>
-
-        {isStreaming && !text ? (
+        {showStreamingStatus && isStreaming && !text ? (
           <StreamingStatus label="Dexter is thinking..." />
         ) : isUser ? (
-          <Bubble align="end" variant="default" className="max-w-full">
+          <Bubble align="end" variant="default" className="max-w-[min(34rem,82%)]">
             <BubbleContent className="px-3.5 py-2.5">{cleanText}</BubbleContent>
           </Bubble>
         ) : (
-          <Bubble variant="ghost" className="max-w-full">
-            <BubbleContent className="flex flex-col gap-2.5 text-foreground">
-              {message.parts.map((part, index) => {
-                if (part.type !== "text") return null;
+          <BubbleGroup>
+            {message.parts.map((part, index) => {
+              if (part.type !== "text") return null;
 
-                const partText = parseViewBriefMarker(part.text).cleanText;
-                if (!partText) return null;
+              const partText = parseViewBriefMarker(part.text).cleanText;
+              if (!partText) return null;
 
-                return (
-                  <ProductionStream
-                    key={`${part.type}-${index}`}
-                    content={partText}
-                    isStreaming={isStreaming}
-                  />
-                );
-              })}
-            </BubbleContent>
-          </Bubble>
+              return (
+                <Bubble
+                  key={`${part.type}-${index}`}
+                  variant="muted"
+                  className="max-w-[min(38rem,86%)]"
+                >
+                  <BubbleContent className="flex flex-col gap-2.5 px-3.5 py-2.5 text-foreground">
+                    <ProductionStream
+                      content={partText}
+                      isStreaming={isStreaming}
+                    />
+                  </BubbleContent>
+                </Bubble>
+              );
+            })}
+          </BubbleGroup>
         )}
 
-        {(!isUser && (cleanText || runId || (isStreaming && text))) && (
+        {(!isUser && (cleanText || runId || (showStreamingStatus && isStreaming && text))) && (
           <MessageFooter className="gap-1 px-1">
-            {isStreaming && text ? (
+            {showStreamingStatus && isStreaming && text ? (
               <StreamingStatus label="Calling Moonshot..." />
             ) : null}
             {runId ? (

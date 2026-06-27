@@ -1,9 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import {
   mockContacts,
-  mockMessages,
   mockProjects,
-  mockSessions,
   mockTasks,
   mockWorkspaces,
 } from "@/lib/mock-data";
@@ -152,19 +150,6 @@ export async function seedDatabase() {
     );
   }
 
-  for (const s of mockSessions) {
-    await database.execute(
-      "INSERT OR IGNORE INTO sessions (id, project_id, title, pinned, updated_at) VALUES ($1, $2, $3, $4, $5)",
-      [s.id, s.projectId, s.title, s.pinned ? 1 : 0, s.updatedAt],
-    );
-  }
-
-  for (const m of mockMessages) {
-    await database.execute(
-      "INSERT OR IGNORE INTO messages (id, session_id, role, content, created_at) VALUES ($1, $2, $3, $4, $5)",
-      [m.id, m.sessionId, m.role, m.content, m.createdAt],
-    );
-  }
 }
 
 export async function insertMessage(message: Message) {

@@ -22,10 +22,10 @@ interface SelectionState {
   clearContextChips: () => void;
 }
 
-export const useSelectionStore = create<SelectionState>((set, get) => ({
-  workspaceId: "ws-1",
-  projectId: "proj-1",
-  sessionId: "session-1",
+export const useSelectionStore = create<SelectionState>((set, get) => ({
+  workspaceId: "ws-1",
+  projectId: "proj-1",
+  sessionId: null,
   selectedTaskId: null,
   selectedContactId: null,
   selectedMemberId: null,

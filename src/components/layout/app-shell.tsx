@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { usePanelRef } from "react-resizable-panels";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
 import { MainWorkspace } from "@/components/workspace/main-workspace";
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
@@ -12,6 +13,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { Button } from "@/components/ui/button";
 import { useShellStore } from "@/stores/shell-store";
 
 export function AppShell() {
@@ -21,6 +23,8 @@ export function AppShell() {
     inspectorCollapsed,
     navPanelSize,
     inspectorPanelSize,
+    setNavCollapsed,
+    setInspectorCollapsed,
     setNavPanelSize,
     setInspectorPanelSize,
   } = useShellStore();
@@ -55,7 +59,7 @@ export function AppShell() {
   }, [inspectorCollapsed, inspectorPanelRef]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-shell">
+    <div className="relative flex h-full flex-col overflow-hidden bg-shell">
       <ResizablePanelGroup
         id="app-shell"
         orientation="horizontal"
@@ -122,6 +126,30 @@ export function AppShell() {
           </>
         )}
       </ResizablePanelGroup>
+      {navCollapsed ? (
+        <Button
+          variant="outline"
+          size="icon-sm"
+          className="absolute left-2 top-3 z-20 bg-pane shadow-sm"
+          onClick={() => setNavCollapsed(false)}
+          aria-label="Show sidebar"
+          title="Show sidebar"
+        >
+          <ChevronRight />
+        </Button>
+      ) : null}
+      {inspectorCollapsed && activeView !== "nodes" ? (
+        <Button
+          variant="outline"
+          size="icon-sm"
+          className="absolute right-2 top-3 z-20 bg-pane shadow-sm"
+          onClick={() => setInspectorCollapsed(false)}
+          aria-label="Show inspector"
+          title="Show inspector"
+        >
+          <ChevronLeft />
+        </Button>
+      ) : null}
       <CommandPalette />
       <ShortcutsDialog />
       <SettingsSheet />

@@ -10,6 +10,7 @@ export interface Project {
   workspaceId: string;
   name: string;
   slug: string;
+  archivedAt?: string;
 }
 
 export interface Task {
@@ -50,6 +51,7 @@ export interface Session {
   title: string;
   pinned: boolean;
   updatedAt: string;
+  archivedAt?: string;
 }
 
 export interface Message {

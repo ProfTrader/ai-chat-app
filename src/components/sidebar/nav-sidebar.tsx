@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   Bell,
@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Columns3,
   ContactRound,
@@ -18,14 +19,13 @@ import {
   MoreHorizontal,
   Network,
   Pin,
+  Plus,
   Search,
   Settings,
   Sparkles,
-  SquarePen,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
+import { toast } from "sonner";
 import type { Project, Session, ViewType } from "@/types";
 
 const projectFiles: {
@@ -90,6 +91,76 @@ const navButtonClass = (isActive: boolean) =>
       ? "bg-active-soft text-foreground"
       : "text-muted-foreground hover:bg-muted hover:text-foreground",
   );
+
+const notificationKeys = {
+  inbox: (workspaceId: string) => `workspace:${workspaceId}:inbox`,
+  projects: (workspaceId: string) => `workspace:${workspaceId}:projects`,
+  session: (sessionId: string) => `session:${sessionId}`,
+  projectView: (projectId: string, view: ViewType) => `project:${projectId}:${view}`,
+};
+
+function hasUnreadSince({
+  timestamp,
+  key,
+  readAt,
+  baseline,
+}: {
+  timestamp?: string;
+  key: string;
+  readAt: Record<string, string>;
+  baseline: string | null;
+}) {
+  if (!timestamp || !baseline) return false;
+  const seenAt = readAt[key] ?? baseline;
+  return new Date(timestamp).getTime() > new Date(seenAt).getTime();
+}
+
+function latestTimestamp(values: Array<string | undefined>) {
+  return values
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+}
+
+function sumUnreadCounts(counts: Partial<Record<ViewType, number>>) {
+  return Object.values(counts).reduce((sum, count) => sum + (count ?? 0), 0);
+}
+
+function NotificationBadge({ count }: { count?: number }) {
+  if (!count) return null;
+
+  return (
+    <span
+      className="ml-auto inline-flex size-3 shrink-0 items-center justify-center rounded-full ring-2 ring-active-soft"
+      aria-label={`${count} unread notifications`}
+      title={`${count} unread notifications`}
+    >
+      <span className="size-1.5 rounded-full bg-active" />
+    </span>
+  );
+}
+
+function AiWorkingDot({ active }: { active: boolean }) {
+  if (!active) return null;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="grid size-6 place-items-center rounded-full bg-active-soft"
+            aria-label="AI is working"
+            role="status"
+          />
+        }
+      >
+        <span className="shimmer shimmer-duration-1000 text-sm leading-none text-active">
+          ●
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>AI is working</TooltipContent>
+    </Tooltip>
+  );
+}
 
 function WorkspaceButton() {
   return (
@@ -132,11 +203,7 @@ function ModuleButton({
     >
       <Icon data-icon="inline-start" />
       <span className="truncate">{label}</span>
-      {count ? (
-        <Badge variant="secondary" className="ml-auto h-5 min-w-5 rounded-full px-1.5 text-[11px] font-normal">
-          {count}
-        </Badge>
-      ) : null}
+      <NotificationBadge count={count} />
     </Button>
   );
 }
@@ -255,43 +322,138 @@ function ProjectFileItem({
     >
       <Icon data-icon="inline-start" />
       <span className="truncate">{label}</span>
-      {typeof count === "number" ? (
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span>
-      ) : null}
+      <NotificationBadge count={count} />
     </Button>
+  );
+}
+
+function ProjectChatItem({
+  count,
+  isActive,
+  canArchive,
+  onOpen,
+  onCreate,
+  onArchive,
+}: {
+  count?: number;
+  isActive?: boolean;
+  canArchive: boolean;
+  onOpen: () => void;
+  onCreate: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-8 w-full items-center gap-1 rounded-md px-2 text-sm",
+        isActive
+          ? "bg-active-soft text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        onClick={onOpen}
+      >
+        <MessageSquare className="size-3.5 shrink-0" />
+        <span className="truncate">Chat</span>
+        <NotificationBadge count={count} />
+      </button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label="New chat in project"
+              onClick={onCreate}
+            />
+          }
+        >
+          <Plus />
+        </TooltipTrigger>
+        <TooltipContent>New chat</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={!canArchive}
+              aria-label="Archive active project chat"
+              onClick={onArchive}
+            />
+          }
+        >
+          <Archive />
+        </TooltipTrigger>
+        <TooltipContent>Archive active chat</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
 function SessionTreeRow({
   session,
   isActive,
+  unreadCount,
+  onArchive,
   onClick,
 }: {
   session: Session;
   isActive: boolean;
+  unreadCount?: number;
+  onArchive: () => void;
   onClick: () => void;
 }) {
   return (
-    <Button
-      variant="ghost"
+    <div
       className={cn(
-        "h-8 w-full justify-start gap-2 rounded-md px-2 pl-6 text-sm font-normal",
+        "group flex h-8 w-full items-center gap-1 rounded-md pr-1 text-sm font-normal",
         isActive
           ? "bg-muted text-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
-      onClick={onClick}
     >
-      {session.pinned ? (
-        <Pin className="size-3.5 shrink-0 text-fin" />
-      ) : (
-        <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
-      )}
-      <span className="min-w-0 flex-1 truncate text-left">{session.title}</span>
-      <span className="shrink-0 text-[11px] text-muted-foreground">
-        {formatRelativeTime(session.updatedAt)}
-      </span>
-    </Button>
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-6 text-left"
+        onClick={onClick}
+      >
+        {session.pinned ? (
+          <Pin className="size-3.5 shrink-0 text-fin" />
+        ) : (
+          <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
+        )}
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+        <NotificationBadge count={unreadCount} />
+        {!unreadCount ? (
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {formatRelativeTime(session.updatedAt)}
+          </span>
+        ) : null}
+      </button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label={`Archive ${session.title}`}
+              onClick={onArchive}
+            />
+          }
+        >
+          <Archive />
+        </TooltipTrigger>
+        <TooltipContent>Archive session</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -300,12 +462,16 @@ function SessionCategory({
   sessions,
   activeSessionId,
   activeView,
+  unreadCounts,
+  onArchive,
   onSelect,
 }: {
   label: string;
   sessions: Session[];
   activeSessionId: string | null;
   activeView: ViewType;
+  unreadCounts: Map<string, number>;
+  onArchive: (session: Session) => void;
   onSelect: (session: Session) => void;
 }) {
   if (sessions.length === 0) return null;
@@ -320,6 +486,8 @@ function SessionCategory({
           key={session.id}
           session={session}
           isActive={session.id === activeSessionId && activeView === "chat"}
+          unreadCount={unreadCounts.get(session.id)}
+          onArchive={() => onArchive(session)}
           onClick={() => onSelect(session)}
         />
       ))}
@@ -334,6 +502,8 @@ function ProjectTreeItem({
   activeSessionId,
   activeView,
   counts,
+  sessionUnreadCounts,
+  unreadCount,
 }: {
   project: Project;
   isActive: boolean;
@@ -341,9 +511,13 @@ function ProjectTreeItem({
   activeSessionId: string | null;
   activeView: ViewType;
   counts: Partial<Record<ViewType, number>>;
+  sessionUnreadCounts: Map<string, number>;
+  unreadCount?: number;
 }) {
   const { setProjectId, setSessionId } = useSelectionStore();
   const { setActiveView, setSidebarMode } = useShellStore();
+  const addSession = useDataStore((s) => s.addSession);
+  const archiveSession = useDataStore((s) => s.archiveSession);
 
   const firstSession = sessions[0];
   const pinnedSessions = sessions.filter((session) => session.pinned);
@@ -353,6 +527,27 @@ function ProjectTreeItem({
     setSessionId(session.id);
     setActiveView("chat");
     setSidebarMode("projects");
+  };
+  const createSession = async () => {
+    const session = await addSession(project.id);
+    setProjectId(project.id);
+    setSessionId(session.id);
+    setActiveView("chat");
+    setSidebarMode("projects");
+    toast.success("Chat created");
+  };
+  const archiveProjectSession = (session: Session) => {
+    archiveSession(session.id);
+    if (session.id === activeSessionId) {
+      const nextSession = sessions.find((item) => item.id !== session.id);
+      setSessionId(nextSession?.id ?? null);
+    }
+    toast.success(`${session.title} archived`);
+  };
+  const archiveActiveSession = () => {
+    const session = sessions.find((item) => item.id === activeSessionId) ?? firstSession;
+    if (!session) return;
+    archiveProjectSession(session);
   };
   const openProject = () => {
     setProjectId(project.id);
@@ -398,16 +593,18 @@ function ProjectTreeItem({
         <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
           {project.name}
         </span>
+        <NotificationBadge count={unreadCount} />
       </Button>
 
       {isActive ? (
         <div className="ml-4 mt-1 space-y-0.5 border-l border-border/70 pl-2">
-          <ProjectFileItem
-            icon={MessageSquare}
-            label="Chat"
+          <ProjectChatItem
             count={counts.chat}
             isActive={activeView === "chat"}
-            onClick={() => openFile("chat")}
+            canArchive={sessions.length > 0}
+            onOpen={() => openFile("chat")}
+            onCreate={() => void createSession()}
+            onArchive={archiveActiveSession}
           />
           {sessions.length === 0 ? (
             <div className="rounded-md px-2 py-1.5 pl-6 text-xs text-muted-foreground">
@@ -420,6 +617,8 @@ function ProjectTreeItem({
                 sessions={pinnedSessions}
                 activeSessionId={activeSessionId}
                 activeView={activeView}
+                unreadCounts={sessionUnreadCounts}
+                onArchive={archiveProjectSession}
                 onSelect={selectSession}
               />
               <SessionCategory
@@ -427,6 +626,8 @@ function ProjectTreeItem({
                 sessions={recentSessions}
                 activeSessionId={activeSessionId}
                 activeView={activeView}
+                unreadCounts={sessionUnreadCounts}
+                onArchive={archiveProjectSession}
                 onSelect={selectSession}
               />
             </div>
@@ -453,11 +654,13 @@ function ProjectTreeItem({
 function SessionItem({
   session,
   isActive,
+  unreadCount,
   showProject,
   projectName,
 }: {
   session: Session;
   isActive: boolean;
+  unreadCount?: number;
   showProject?: boolean;
   projectName?: string;
 }) {
@@ -494,19 +697,35 @@ function SessionItem({
           {formatRelativeTime(session.updatedAt)}
         </span>
       </span>
+      <NotificationBadge count={unreadCount} />
     </Button>
   );
 }
 
 function QueuePanel({ query }: { query: string }) {
-  const { projects, sessions, tasks, workRuns, getTeamMembersByProject } = useDataStore();
-  const { workspaceId, projectId, sessionId } = useSelectionStore();
-  const { activeView, sidebarMode } = useShellStore();
+  const {
+    projects,
+    sessions,
+    messages,
+    tasks,
+    workRuns,
+    addProject,
+    archiveProject,
+  } = useDataStore();
+  const { workspaceId, projectId, sessionId, setProjectId, setSessionId } = useSelectionStore();
+  const {
+    activeView,
+    sidebarMode,
+    setActiveView,
+    notificationReadAt,
+    notificationsInitializedAt,
+  } = useShellStore();
 
   const workspaceProjects = useMemo(
     () =>
       projects
         .filter((project) => project.workspaceId === workspaceId)
+        .filter((project) => !project.archivedAt)
         .filter((project) => {
           const normalizedQuery = query.toLowerCase();
           if (!normalizedQuery) return true;
@@ -515,6 +734,7 @@ function QueuePanel({ query }: { query: string }) {
             sessions.some(
               (session) =>
                 session.projectId === project.id &&
+                !session.archivedAt &&
                 session.title.toLowerCase().includes(normalizedQuery),
             )
           );
@@ -540,6 +760,7 @@ function QueuePanel({ query }: { query: string }) {
             ? session.projectId === projectId
             : workspaceProjectIds.has(session.projectId),
         )
+        .filter((session) => !session.archivedAt)
         .filter((session) => session.title.toLowerCase().includes(query.toLowerCase())),
     [sessions, sidebarMode, projectId, workspaceProjectIds, query],
   );
@@ -548,40 +769,174 @@ function QueuePanel({ query }: { query: string }) {
     const grouped = new Map<string, Session[]>();
     for (const session of sessions) {
       if (!workspaceProjectIds.has(session.projectId)) continue;
+      if (session.archivedAt) continue;
       grouped.set(session.projectId, [...(grouped.get(session.projectId) ?? []), session]);
     }
     return grouped;
   }, [sessions, workspaceProjectIds]);
 
+  const sessionUnreadCounts = useMemo(() => {
+    const groupedMessages = new Map<string, typeof messages>();
+    messages.forEach((message) => {
+      groupedMessages.set(message.sessionId, [
+        ...(groupedMessages.get(message.sessionId) ?? []),
+        message,
+      ]);
+    });
+
+    return new Map(
+      sessions
+        .filter((session) => !session.archivedAt)
+        .map((session) => {
+          const key = notificationKeys.session(session.id);
+          const unreadMessages = (groupedMessages.get(session.id) ?? []).filter(
+            (message) =>
+              message.role !== "user" &&
+              hasUnreadSince({
+                timestamp: message.createdAt,
+                key,
+                readAt: notificationReadAt,
+                baseline: notificationsInitializedAt,
+              }),
+          ).length;
+          const fallbackUnread =
+            unreadMessages === 0 &&
+            hasUnreadSince({
+              timestamp: session.updatedAt,
+              key,
+              readAt: notificationReadAt,
+              baseline: notificationsInitializedAt,
+            })
+              ? 1
+              : 0;
+
+          return [session.id, unreadMessages || fallbackUnread] as const;
+        })
+        .filter(([, count]) => count > 0),
+    );
+  }, [messages, notificationReadAt, notificationsInitializedAt, sessions]);
+
   const countsForProject = (id: string): Partial<Record<ViewType, number>> => {
     const projectTasks = tasks.filter((task) => task.projectId === id);
+    const projectSessions = sessions.filter(
+      (session) => session.projectId === id && !session.archivedAt,
+    );
+    const projectWorkRuns = workRuns.filter((run) => run.projectId === id);
     return {
-      chat: sessions.filter((session) => session.projectId === id).length,
-      briefs: workRuns.filter((run) => run.projectId === id).length,
-      tasks: projectTasks.filter((task) => task.status !== "done").length,
-      board: projectTasks.length,
-      contacts: getTeamMembersByProject(id).length,
+      chat: projectSessions.reduce(
+        (sum, session) => sum + (sessionUnreadCounts.get(session.id) ?? 0),
+        0,
+      ),
+      briefs: projectWorkRuns.filter((run) =>
+        hasUnreadSince({
+          timestamp: run.updatedAt,
+          key: notificationKeys.projectView(id, "briefs"),
+          readAt: notificationReadAt,
+          baseline: notificationsInitializedAt,
+        }),
+      ).length,
+      tasks: projectTasks.filter((task) =>
+        hasUnreadSince({
+          timestamp: task.updatedAt,
+          key: notificationKeys.projectView(id, "tasks"),
+          readAt: notificationReadAt,
+          baseline: notificationsInitializedAt,
+        }),
+      ).length,
+      board: projectTasks.filter((task) =>
+        hasUnreadSince({
+          timestamp: task.updatedAt,
+          key: notificationKeys.projectView(id, "board"),
+          readAt: notificationReadAt,
+          baseline: notificationsInitializedAt,
+        }),
+      ).length,
+      contacts: 0,
     };
   };
+  const createProject = async () => {
+    const nextProjectNumber = projects.filter((project) => project.workspaceId === workspaceId).length + 1;
+    const project = await addProject(`New Project ${nextProjectNumber}`, workspaceId);
+    setProjectId(project.id);
+    setSessionId(null);
+    setActiveView("chat");
+    toast.success("Project created");
+  };
+
+  const archiveCurrentProject = () => {
+    const currentProject = workspaceProjects.find((project) => project.id === projectId);
+    if (!currentProject) return;
+    archiveProject(currentProject.id);
+    const nextProject = workspaceProjects.find((project) => project.id !== currentProject.id);
+    setProjectId(nextProject?.id ?? "");
+    setSessionId(null);
+    toast.success(`${currentProject.name} archived`);
+  };
+  const projectsUnreadCount = workspaceProjects.reduce(
+    (sum, project) => sum + sumUnreadCounts(countsForProject(project.id)),
+    0,
+  );
 
   if (sidebarMode === "projects") {
     return (
       <div className="p-2">
-        <div className="mb-1 flex items-center gap-2 px-1 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          <FolderOpen className="size-3.5" />
-          Projects
+        <div className="mb-1 flex items-center gap-1 px-1 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <FolderOpen className="size-3.5" />
+            <span>Projects</span>
+            <NotificationBadge count={projectsUnreadCount} />
+          </div>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground"
+                  aria-label="New project"
+                  onClick={() => void createProject()}
+                />
+              }
+            >
+              <Plus />
+            </TooltipTrigger>
+            <TooltipContent>New project</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground"
+                  disabled={!projectId}
+                  aria-label="Archive project"
+                  onClick={archiveCurrentProject}
+                />
+              }
+            >
+              <Archive />
+            </TooltipTrigger>
+            <TooltipContent>Archive project</TooltipContent>
+          </Tooltip>
         </div>
-        {workspaceProjects.map((project) => (
-          <ProjectTreeItem
-            key={project.id}
-            project={project}
-            isActive={project.id === projectId}
-            sessions={sessionsByProjectId.get(project.id) ?? []}
-            activeSessionId={sessionId}
-            activeView={activeView}
-            counts={countsForProject(project.id)}
-          />
-        ))}
+        {workspaceProjects.map((project) => {
+          const counts = countsForProject(project.id);
+
+          return (
+            <ProjectTreeItem
+              key={project.id}
+              project={project}
+              isActive={project.id === projectId}
+              sessions={sessionsByProjectId.get(project.id) ?? []}
+              activeSessionId={sessionId}
+              activeView={activeView}
+              counts={counts}
+              sessionUnreadCounts={sessionUnreadCounts}
+              unreadCount={sumUnreadCounts(counts)}
+            />
+          );
+        })}
       </div>
     );
   }
@@ -596,6 +951,7 @@ function QueuePanel({ query }: { query: string }) {
           key={session.id}
           session={session}
           isActive={session.id === sessionId}
+          unreadCount={sessionUnreadCounts.get(session.id)}
           showProject
           projectName={projectNameById.get(session.projectId)}
         />
@@ -611,12 +967,209 @@ export function NavSidebar() {
     setActiveView,
     setSidebarMode,
     setCommandOpen,
+    setNavCollapsed,
+    agentWorking,
+    notificationReadAt,
+    notificationsInitializedAt,
+    initializeNotifications,
+    markNotificationReads,
   } = useShellStore();
-  const { projectId, setSessionId } = useSelectionStore();
+  const { workspaceId, projectId, sessionId, setSessionId } = useSelectionStore();
   const addSession = useDataStore((s) => s.addSession);
-  const inboxCount = useDataStore((s) => s.sessions.length);
-  const projectCount = useDataStore((s) => s.projects.length);
+  const archiveSession = useDataStore((s) => s.archiveSession);
+  const sessions = useDataStore((s) => s.sessions);
+  const messages = useDataStore((s) => s.messages);
+  const projects = useDataStore((s) => s.projects);
+  const tasks = useDataStore((s) => s.tasks);
+  const workRuns = useDataStore((s) => s.workRuns);
+  const storedAgentWorking = useDataStore((s) =>
+    s.agentBrainRuns.some((run) => run.status === "running" || run.status === "queued"),
+  );
   const [query, setQuery] = useState("");
+
+  const workspaceProjectIds = useMemo(
+    () =>
+      new Set(
+        projects
+          .filter((project) => project.workspaceId === workspaceId && !project.archivedAt)
+          .map((project) => project.id),
+      ),
+    [projects, workspaceId],
+  );
+
+  const sessionUnreadCounts = useMemo(() => {
+    const groupedMessages = new Map<string, typeof messages>();
+    messages.forEach((message) => {
+      groupedMessages.set(message.sessionId, [
+        ...(groupedMessages.get(message.sessionId) ?? []),
+        message,
+      ]);
+    });
+
+    return new Map(
+      sessions
+        .filter((session) => !session.archivedAt)
+        .map((session) => {
+          const key = notificationKeys.session(session.id);
+          const unreadMessages = (groupedMessages.get(session.id) ?? []).filter(
+            (message) =>
+              message.role !== "user" &&
+              hasUnreadSince({
+                timestamp: message.createdAt,
+                key,
+                readAt: notificationReadAt,
+                baseline: notificationsInitializedAt,
+              }),
+          ).length;
+          const fallbackUnread =
+            unreadMessages === 0 &&
+            hasUnreadSince({
+              timestamp: session.updatedAt,
+              key,
+              readAt: notificationReadAt,
+              baseline: notificationsInitializedAt,
+            })
+              ? 1
+              : 0;
+
+          return [session.id, unreadMessages || fallbackUnread] as const;
+        })
+        .filter(([, count]) => count > 0),
+    );
+  }, [messages, notificationReadAt, notificationsInitializedAt, sessions]);
+
+  const projectUnreadTotals = useMemo(
+    () =>
+      new Map(
+        projects
+          .filter((project) => project.workspaceId === workspaceId && !project.archivedAt)
+          .map((project) => {
+            const projectSessions = sessions.filter(
+              (session) => session.projectId === project.id && !session.archivedAt,
+            );
+            const chatUnread = projectSessions.reduce(
+              (sum, session) => sum + (sessionUnreadCounts.get(session.id) ?? 0),
+              0,
+            );
+            const taskUnread = tasks.filter(
+              (task) =>
+                task.projectId === project.id &&
+                hasUnreadSince({
+                  timestamp: task.updatedAt,
+                  key: notificationKeys.projectView(project.id, "tasks"),
+                  readAt: notificationReadAt,
+                  baseline: notificationsInitializedAt,
+                }),
+            ).length;
+            const boardUnread = tasks.filter(
+              (task) =>
+                task.projectId === project.id &&
+                hasUnreadSince({
+                  timestamp: task.updatedAt,
+                  key: notificationKeys.projectView(project.id, "board"),
+                  readAt: notificationReadAt,
+                  baseline: notificationsInitializedAt,
+                }),
+            ).length;
+            const briefUnread = workRuns.filter(
+              (run) =>
+                run.projectId === project.id &&
+                hasUnreadSince({
+                  timestamp: run.updatedAt,
+                  key: notificationKeys.projectView(project.id, "briefs"),
+                  readAt: notificationReadAt,
+                  baseline: notificationsInitializedAt,
+                }),
+            ).length;
+
+            return [project.id, chatUnread + taskUnread + boardUnread + briefUnread] as const;
+          }),
+      ),
+    [
+      notificationReadAt,
+      notificationsInitializedAt,
+      projects,
+      sessionUnreadCounts,
+      sessions,
+      tasks,
+      workRuns,
+      workspaceId,
+    ],
+  );
+
+  const inboxCount = sessions
+    .filter((session) => !session.archivedAt && workspaceProjectIds.has(session.projectId))
+    .reduce((sum, session) => sum + (sessionUnreadCounts.get(session.id) ?? 0), 0);
+  const projectCount = Array.from(projectUnreadTotals.values()).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+
+  const activeReadVersion = useMemo(() => {
+    if (!projectId) return sessionId ?? activeView;
+
+    const activeSessionTimestamp =
+      sessionId && activeView === "chat"
+        ? latestTimestamp([
+            sessions.find((session) => session.id === sessionId)?.updatedAt,
+            ...messages
+              .filter((message) => message.sessionId === sessionId)
+              .map((message) => message.createdAt),
+          ])
+        : undefined;
+    const taskTimestamp =
+      activeView === "tasks" || activeView === "board"
+        ? latestTimestamp(
+            tasks
+              .filter((task) => task.projectId === projectId)
+              .map((task) => task.updatedAt),
+          )
+        : undefined;
+    const briefTimestamp =
+      activeView === "briefs"
+        ? latestTimestamp(
+            workRuns
+              .filter((run) => run.projectId === projectId)
+              .map((run) => run.updatedAt),
+          )
+        : undefined;
+
+    return [activeView, projectId, sessionId, activeSessionTimestamp, taskTimestamp, briefTimestamp]
+      .filter(Boolean)
+      .join("|");
+  }, [activeView, messages, projectId, sessionId, sessions, tasks, workRuns]);
+
+  useEffect(() => {
+    const now = new Date().toISOString();
+    if (!notificationsInitializedAt) {
+      initializeNotifications(now);
+      return;
+    }
+
+    const keys = [
+      sidebarMode === "inbox" ? notificationKeys.inbox(workspaceId) : null,
+      sidebarMode === "projects" ? notificationKeys.projects(workspaceId) : null,
+      projectId && activeView === "chat"
+        ? notificationKeys.projectView(projectId, "chat")
+        : null,
+      projectId && activeView !== "chat" && activeView !== "nodes" && activeView !== "timeline"
+        ? notificationKeys.projectView(projectId, activeView)
+        : null,
+      sessionId && activeView === "chat" ? notificationKeys.session(sessionId) : null,
+    ].filter((key): key is string => Boolean(key));
+
+    markNotificationReads(keys, now);
+  }, [
+    activeReadVersion,
+    activeView,
+    initializeNotifications,
+    markNotificationReads,
+    notificationsInitializedAt,
+    projectId,
+    sessionId,
+    sidebarMode,
+    workspaceId,
+  ]);
 
   const handleNewSession = async () => {
     if (!projectId) return;
@@ -624,6 +1177,17 @@ export function NavSidebar() {
     setSessionId(session.id);
     setActiveView("chat");
     setSidebarMode("projects");
+  };
+
+  const handleArchiveSession = () => {
+    if (!sessionId) return;
+    const session = sessions.find((item) => item.id === sessionId);
+    archiveSession(sessionId);
+    const nextSession = sessions.find(
+      (item) => item.projectId === projectId && item.id !== sessionId && !item.archivedAt,
+    );
+    setSessionId(nextSession?.id ?? null);
+    toast.success(`${session?.title ?? "Chat"} archived`);
   };
 
   return (
@@ -687,14 +1251,7 @@ export function NavSidebar() {
       </aside>
 
       <section className="flex min-w-0 flex-col">
-        <div className="flex h-11 items-center gap-2 border-b border-border px-3">
-          <Search className="size-4 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
-            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-          />
+        <div className="flex h-11 items-center gap-1 border-b border-border px-2">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -702,6 +1259,31 @@ export function NavSidebar() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label="Hide sidebar"
+                  onClick={() => setNavCollapsed(true)}
+                />
+              }
+            >
+              <ChevronLeft />
+            </TooltipTrigger>
+            <TooltipContent>Hide sidebar</TooltipContent>
+          </Tooltip>
+          <Search className="size-4 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search"
+            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+          />
+          <AiWorkingDot active={agentWorking || storedAgentWorking} />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  aria-label="Search all"
                   onClick={() => setCommandOpen(true)}
                 />
               }
@@ -717,13 +1299,31 @@ export function NavSidebar() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label="New chat"
                   onClick={() => void handleNewSession()}
                 />
               }
             >
-              <SquarePen />
+              <Plus />
             </TooltipTrigger>
             <TooltipContent>New session</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  disabled={!sessionId}
+                  aria-label="Archive chat"
+                  onClick={handleArchiveSession}
+                />
+              }
+            >
+              <Archive />
+            </TooltipTrigger>
+            <TooltipContent>Archive chat</TooltipContent>
           </Tooltip>
         </div>
 

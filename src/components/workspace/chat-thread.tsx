@@ -18,13 +18,6 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Message,
-  MessageAvatar,
-  MessageContent,
-  MessageHeader,
-} from "@/components/ui/message";
 import { Spinner } from "@/components/ui/spinner";
 import { ChatMessage } from "@/components/workspace/chat-message";
 import { useChatSession, type ChatActivity } from "@/lib/chat/chat-session-provider";
@@ -33,10 +26,10 @@ import { useShellStore } from "@/stores/shell-store";
 import { cn } from "@/lib/utils";
 
 const thinkingPhrases = [
-  "Dexter is thinking through the request",
-  "Dexter is pondering the useful angle",
-  "Dexter is lining up the context",
-  "Dexter is checking the next move",
+  "is thinking through the request",
+  "is lining up the context",
+  "is checking the next move",
+  "is preparing the answer",
 ];
 
 function ThinkingPhrase() {
@@ -53,75 +46,27 @@ function ThinkingPhrase() {
   return <span>{thinkingPhrases[phraseIndex]}</span>;
 }
 
-function AssistantWarmupMarker() {
+function LiveAssistantStatus({ activity }: { activity?: ChatActivity }) {
+  const label = activity?.detail
+    ? `${activity.label}: ${activity.detail}`
+    : activity?.label;
+
   return (
-    <Message align="start" className="items-end">
-      <MessageAvatar className="bg-transparent">
-        <Avatar size="sm" className="bg-primary/10">
-          <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
-        </Avatar>
-      </MessageAvatar>
-      <MessageContent className="max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5">
-        <MessageHeader className="px-1">
-          <span>Dexter</span>
-        </MessageHeader>
-        <Marker role="status" className="w-fit px-1">
-          <MarkerIcon>
-            <Spinner role="presentation" aria-hidden="true" className="text-active" />
-          </MarkerIcon>
-          <MarkerContent className="shimmer">
+    <Marker role="status" aria-live="polite" className="w-fit pl-10 pr-1 text-xs">
+      <MarkerIcon>
+        <Spinner role="presentation" aria-hidden="true" className="text-active" />
+      </MarkerIcon>
+      <MarkerContent className="shimmer shimmer-duration-1000">
+        {label ? (
+          label
+        ) : (
+          <>
+            <span className="font-medium">Dexter</span>{" "}
             <ThinkingPhrase />
-          </MarkerContent>
-        </Marker>
-      </MessageContent>
-    </Message>
-  );
-}
-
-function ActivityStatusDot({ status }: { status: ChatActivity["status"] }) {
-  return (
-    <span
-      className={cn(
-        "mt-1 size-2 shrink-0 rounded-full",
-        status === "running" && "animate-pulse bg-active",
-        status === "complete" && "bg-success",
-        status === "error" && "bg-destructive",
-      )}
-    />
-  );
-}
-
-function AgentActivityTrail({ activities }: { activities: ChatActivity[] }) {
-  if (activities.length === 0) return null;
-
-  return (
-    <Message align="start" className="items-end">
-      <MessageAvatar className="bg-transparent">
-        <Avatar size="sm" className="bg-primary/10">
-          <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
-        </Avatar>
-      </MessageAvatar>
-      <MessageContent className="max-w-[min(42rem,calc(100%-2.5rem))] gap-1.5">
-        <MessageHeader className="px-1">
-          <span>Agent activity</span>
-        </MessageHeader>
-        <div className="w-fit min-w-72 max-w-full rounded-md border border-border bg-card/70 px-3 py-2 text-xs shadow-sm">
-          <div className="space-y-2">
-            {activities.slice(-5).map((activity) => (
-              <div key={activity.id} className="flex gap-2">
-                <ActivityStatusDot status={activity.status} />
-                <div className="min-w-0">
-                  <p className="font-medium text-foreground">{activity.label}</p>
-                  {activity.detail ? (
-                    <p className="mt-0.5 text-muted-foreground">{activity.detail}</p>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </MessageContent>
-    </Message>
+          </>
+        )}
+      </MarkerContent>
+    </Marker>
   );
 }
 
@@ -157,11 +102,13 @@ export function ChatThread() {
     status === "streaming"
       ? [...messages].reverse().find((message) => message.role === "assistant")?.id
       : undefined;
-  const hasAssistantInFlight = Boolean(streamingAssistantId);
-  const showActivityTrail =
+  const runningActivity = [...activities]
+    .reverse()
+    .find((activity) => activity.status === "running");
+  const showLiveStatus =
     status === "submitted" ||
     status === "streaming" ||
-    activities.some((activity) => activity.status === "running" || activity.status === "error");
+    Boolean(runningActivity);
 
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
@@ -183,17 +130,13 @@ export function ChatThread() {
                 <ChatMessage
                   message={message}
                   isStreaming={message.id === streamingAssistantId}
+                  showStreamingStatus={false}
                 />
               </MessageScrollerItem>
             ))}
-            {showActivityTrail && activities.length > 0 && (
-              <MessageScrollerItem messageId="agent-activity">
-                <AgentActivityTrail activities={activities} />
-              </MessageScrollerItem>
-            )}
-            {status === "submitted" && !hasAssistantInFlight && (
-              <MessageScrollerItem messageId="assistant-warmup">
-                <AssistantWarmupMarker />
+            {showLiveStatus && (
+              <MessageScrollerItem messageId="assistant-live-status">
+                <LiveAssistantStatus activity={runningActivity} />
               </MessageScrollerItem>
             )}
           </MessageScrollerContent>

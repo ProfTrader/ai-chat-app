@@ -1,8 +1,6 @@
 import type {
   Contact,
-  Message,
   Project,
-  Session,
   Task,
   TeamMember,
   Workspace,
@@ -176,76 +174,5 @@ export const mockContacts: Contact[] = [
     notes: "Champion for internal rollout.",
     avatarUrl: unsplashAvatars.elena,
     status: "busy",
-  },
-];
-
-export const mockSessions: Session[] = [
-  {
-    id: "session-1",
-    projectId: "proj-1",
-    title: "Launch checklist review",
-    pinned: true,
-    updatedAt: "now",
-  },
-  {
-    id: "session-2",
-    projectId: "proj-1",
-    title: "Onboarding flow brainstorm",
-    pinned: false,
-    updatedAt: "4h",
-  },
-  {
-    id: "session-3",
-    projectId: "proj-2",
-    title: "Enterprise pricing strategy",
-    pinned: true,
-    updatedAt: "1d",
-  },
-  {
-    id: "session-4",
-    projectId: "proj-1",
-    title: "Weekly sync notes",
-    pinned: false,
-    updatedAt: "3d",
-  },
-  {
-    id: "session-5",
-    projectId: "proj-3",
-    title: "Side project ideation",
-    pinned: false,
-    updatedAt: "1mo",
-  },
-];
-
-export const mockMessages: Message[] = [
-  {
-    id: "msg-1",
-    sessionId: "session-1",
-    role: "user",
-    content: "What tasks are blocking the Q2 launch?",
-    createdAt: "2026-06-23T09:00:00Z",
-  },
-  {
-    id: "msg-2",
-    sessionId: "session-1",
-    role: "assistant",
-    content:
-      "Two items are still open: onboarding wireframes (Q2-1) and the analytics dashboard (Q2-3). The beta invite system shipped last week.",
-    createdAt: "2026-06-23T09:00:05Z",
-  },
-  {
-    id: "msg-3",
-    sessionId: "session-1",
-    role: "user",
-    content: "Draft a follow-up for the analytics task owner.",
-    createdAt: "2026-06-23T09:05:00Z",
-  },
-  {
-    id: "msg-4",
-    sessionId: "session-1",
-    role: "assistant",
-    content:
-      "Hi Jordan — quick check on the analytics dashboard (Q2-3). We're targeting Jun 24 for launch readiness. Let me know if you need help prioritizing Mixpanel events.",
-    createdAt: "2026-06-23T09:05:08Z",
   },
 ];

@@ -68,9 +68,7 @@ import {
 } from "@/lib/agents/client";
 import {
   mockContacts,
-  mockMessages,
   mockProjects,
-  mockSessions,
   mockTasks,
   mockTeamMembers,
   mockWorkspaces,
@@ -130,7 +128,9 @@ interface DataState {
   updateMessageContent: (id: string, content: string) => Promise<void>;
   addSession: (projectId: string, title?: string) => Promise<Session>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  archiveSession: (sessionId: string) => void;
   addProject: (name: string, workspaceId: string) => Promise<Project>;
+  archiveProject: (projectId: string) => void;
   importCsvDataset: (
     projectId: string,
     name: string,
@@ -407,7 +407,7 @@ function seedTaskActivities(): TaskActivity[] {
 
 const seedTaskActivityItems = seedTaskActivities();
 const seedRoadmapItems: RoadmapItem[] = [];
-const ARTIFACT_SCHEMA_VERSION = 4;
+const ARTIFACT_SCHEMA_VERSION = 6;
 
 function hydratePersistedData(
   data: PersistedDataPayload,
@@ -428,6 +428,26 @@ function hydratePersistedData(
       ? data.deliveryOutputs
       : [];
   const projects = data.projects ?? mockProjects;
+  const shouldDropSeededChatHistory = (data.artifactSchemaVersion ?? 0) < 6;
+  const storedBrainRuns =
+    Array.isArray(data.agentBrainRuns) && data.agentBrainRuns.every(hasBrainRunShape)
+      ? data.agentBrainRuns
+      : [];
+  const droppedChatRunIds = new Set(
+    shouldDropSeededChatHistory
+      ? storedBrainRuns
+          .filter((run) => run.intent === "conversation" || run.outputKind === "conversation")
+          .map((run) => run.id)
+      : [],
+  );
+  const droppedChatContextIds = new Set(
+    storedBrainRuns
+      .filter((run) => droppedChatRunIds.has(run.id))
+      .map((run) => run.contextPackId),
+  );
+  const agentBrainRuns = storedBrainRuns.filter(
+    (run) => !droppedChatRunIds.has(run.id),
+  );
   const permissionGrants = ensurePermissionGrants(
     projects,
     Array.isArray(data.permissionGrants) ? data.permissionGrants : [],
@@ -441,8 +461,8 @@ function hydratePersistedData(
     projects,
     tasks: data.tasks ?? mockTasks,
     contacts: enrichContacts(data.contacts ?? mockContacts),
-    sessions: data.sessions ?? mockSessions,
-    messages: data.messages ?? mockMessages,
+    sessions: shouldDropSeededChatHistory ? [] : data.sessions ?? [],
+    messages: shouldDropSeededChatHistory ? [] : data.messages ?? [],
     teamMembers: (data.teamMembers ?? mockTeamMembers).map(enrichTeamMember),
     datasets:
       Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
@@ -452,31 +472,34 @@ function hydratePersistedData(
     agentMemoryNotes: Array.isArray(data.agentMemoryNotes)
       ? data.agentMemoryNotes
       : [],
-    agentBrainRuns:
-      Array.isArray(data.agentBrainRuns) && data.agentBrainRuns.every(hasBrainRunShape)
-        ? data.agentBrainRuns
-        : [],
+    agentBrainRuns,
     agentBrainSteps: Array.isArray(data.agentBrainSteps)
-      ? data.agentBrainSteps
+      ? data.agentBrainSteps.filter((step) => !droppedChatRunIds.has(step.runId))
       : [],
     agentBrainToolCalls: Array.isArray(data.agentBrainToolCalls)
-      ? data.agentBrainToolCalls
+      ? data.agentBrainToolCalls.filter((tool) => !droppedChatRunIds.has(tool.runId))
       : [],
     agentObservations: Array.isArray(data.agentObservations)
-      ? data.agentObservations
+      ? data.agentObservations.filter(
+          (observation) => !droppedChatRunIds.has(observation.runId),
+        )
       : [],
     agentApprovals: Array.isArray(data.agentApprovals)
-      ? data.agentApprovals
+      ? data.agentApprovals.filter((approval) => !droppedChatRunIds.has(approval.runId))
       : [],
     agentContextPacks: Array.isArray(data.agentContextPacks)
-      ? data.agentContextPacks
+      ? data.agentContextPacks.filter(
+          (context) => !droppedChatContextIds.has(context.id),
+        )
       : [],
     agentMemories: Array.isArray(data.agentMemories) ? data.agentMemories : [],
     permissionGrants,
     gatewayMessages: Array.isArray(data.gatewayMessages) ? data.gatewayMessages : [],
     workRuns: storedRuns,
     pendingArtifactPlans,
-    deliveryOutputs,
+    deliveryOutputs: deliveryOutputs.filter(
+      (output) => !output.runId || !droppedChatRunIds.has(output.runId),
+    ),
     actionProposals: data.actionProposals ?? [],
     taskActivities: data.taskActivities ?? seedTaskActivityItems,
     roadmapItems: data.roadmapItems ?? seedRoadmapItems,
@@ -494,8 +517,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   projects: mockProjects,
   tasks: mockTasks,
   contacts: mockContacts,
-  sessions: mockSessions,
-  messages: mockMessages,
+  sessions: [],
+  messages: [],
   teamMembers: mockTeamMembers,
   datasets: [],
   agentRuns: [],
@@ -735,6 +758,16 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
   },
 
+  archiveSession: (sessionId) => {
+    const now = new Date().toISOString();
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === sessionId ? { ...session, archivedAt: now, updatedAt: now } : session,
+      ),
+    });
+    persistLocal(get());
+  },
+
   addProject: async (name, workspaceId) => {
     const now = new Date().toISOString();
     const project: Project = {
@@ -752,6 +785,21 @@ export const useDataStore = create<DataState>((set, get) => ({
     });
     persistLocal(get());
     return project;
+  },
+
+  archiveProject: (projectId) => {
+    const now = new Date().toISOString();
+    set({
+      projects: get().projects.map((project) =>
+        project.id === projectId ? { ...project, archivedAt: now } : project,
+      ),
+      sessions: get().sessions.map((session) =>
+        session.projectId === projectId && !session.archivedAt
+          ? { ...session, archivedAt: now, updatedAt: now }
+          : session,
+      ),
+    });
+    persistLocal(get());
   },
 
   importCsvDataset: (projectId, name, domainId, text) => {

@@ -3,6 +3,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PersonAvatar } from "@/components/ui/person-avatar";
 import { AgentBrainPanel } from "@/components/inspector/agent-brain-panel";
 import { UserPanel } from "@/components/inspector/user-panel";
@@ -11,7 +12,9 @@ import { presenceLabels } from "@/lib/avatars";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
+import { useShellStore } from "@/stores/shell-store";
 import type { TaskStatus } from "@/types";
+import { ChevronRight } from "lucide-react";
 
 const statusLabels: Record<TaskStatus, string> = {
   todo: "Todo",
@@ -23,6 +26,7 @@ export function InspectorPanel() {
   const { selectedTaskId, selectedContactId, selectedMemberId, projectId, selectMember } =
     useSelectionStore();
   const { tasks, contacts, updateTaskStatus, getTeamMembersByProject } = useDataStore();
+  const setInspectorCollapsed = useShellStore((state) => state.setInspectorCollapsed);
 
   const task = tasks.find((t) => t.id === selectedTaskId);
   const contact = contacts.find((c) => c.id === selectedContactId);
@@ -172,13 +176,29 @@ export function InspectorPanel() {
   return (
     <div className="flex h-full flex-col bg-pane">
       <Tabs defaultValue="agent" className="flex h-full flex-col">
-        <div className="border-b border-border px-4 pt-4">
-          <TabsList variant="line" className="w-full">
+        <div className="flex items-center gap-2 border-b border-border px-3 pt-3">
+          <TabsList variant="line" className="min-w-0 flex-1">
             <TabsTrigger value="agent">Agent</TabsTrigger>
             <TabsTrigger value="assignees">Assignees</TabsTrigger>
             <TabsTrigger value="labels">Labels</TabsTrigger>
             <TabsTrigger value="priority">Priority</TabsTrigger>
           </TabsList>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="mb-1 text-muted-foreground"
+                  aria-label="Hide inspector"
+                  onClick={() => setInspectorCollapsed(true)}
+                />
+              }
+            >
+              <ChevronRight />
+            </TooltipTrigger>
+            <TooltipContent>Hide inspector</TooltipContent>
+          </Tooltip>
         </div>
         <TabsContent value="agent" className="min-h-0 flex-1 p-0">
           <AgentBrainPanel />

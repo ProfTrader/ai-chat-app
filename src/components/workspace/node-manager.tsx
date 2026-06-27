@@ -1815,16 +1815,16 @@ export function NodeManager() {
                   <div className="flex items-center gap-3 rounded-md bg-muted px-3 py-3">
                     <Bot className="text-muted-foreground" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">Ollama local</p>
+                      <p className="truncate text-sm font-medium">Moonshot/Kimi</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        hermes-gemma4:e4b
+                        kimi-k2.7-code
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3 rounded-md border border-border px-3 py-3">
                     <KeyRound className="mt-0.5 text-active" />
                     <p className="text-sm leading-5 text-muted-foreground">
-                      External sends remain gated by human review even when local inference is enabled.
+                      External sends remain gated by human review while Kimi handles model inference.
                     </p>
                   </div>
                 </section>

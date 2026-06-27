@@ -28,6 +28,10 @@ const SESSION_COOKIE = "nexus_session";
 const sessions = new Map<string, AuthSession>();
 const dataDir = path.join(process.cwd(), ".data");
 const sessionsFile = path.join(dataDir, "sessions.json");
+const DEFAULT_MOONSHOT_MODEL = "kimi-k2.7-code";
+const MOONSHOT_MODEL_ALIASES: Record<string, string> = {
+  "kimi-k2.7": DEFAULT_MOONSHOT_MODEL,
+};
 
 let loaded = false;
 
@@ -123,7 +127,8 @@ export async function resolveMoonshotApiKey(c: Context): Promise<string | null> 
 }
 
 export function resolveMoonshotModel(model?: string | null): string {
-  return model ?? process.env.MOONSHOT_MODEL ?? process.env.KIMI_MODEL ?? "kimi-k2.7";
+  const requested = model ?? process.env.MOONSHOT_MODEL ?? process.env.KIMI_MODEL ?? DEFAULT_MOONSHOT_MODEL;
+  return MOONSHOT_MODEL_ALIASES[requested] ?? requested;
 }
 
 export function resolveMoonshotBaseUrl(): string {
