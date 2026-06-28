@@ -282,6 +282,24 @@
   --sidebar-ring: oklch(0.820 0 0 / 32%);
 }
 
+/*
+ * Sidebar row helpers
+ * -------------------
+ * `.fade-text-r` lets a label fill its row to the right border and fade the
+ * overflowing text out (instead of an abrupt ellipsis). Because the label box
+ * fills the available width, short labels sit at the left and the fade region
+ * falls over empty space — so the fade only ever shows when text overflows.
+ *
+ * Defined as a plain class (not @utility) so it is always emitted and never
+ * participates in the utility scanner.
+ */
+.fade-text-r {
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent 100%);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -8,6 +8,7 @@ import {
 } from "../lib/auth.js";
 import { chatContextSchema, extractLatestUserMessage } from "../lib/context.js";
 import { firmProfileToPromptBlock, loadFirmProfile } from "../lib/firm-profile.js";
+import { agentFilesPromptBlock } from "../lib/agent-files.js";
 import { createCursorChatStream } from "../lib/cursor.js";
 import { createMoonshotChatStream } from "../lib/moonshot.js";
 import {
@@ -66,6 +67,8 @@ chat.post("/", async (c) => {
   // Load the saved firm profile server-side so the agent always carries the
   // firm's "soul", independent of what the client sends.
   const firmRecord = await loadFirmProfile();
+  // Load the agent's durable soul + memory files so they shape every turn.
+  const agentBrainFiles = await agentFilesPromptBlock();
 
   const context = chatContextSchema.parse({
     sessionId: body.sessionId,
@@ -84,6 +87,7 @@ chat.post("/", async (c) => {
     businessProfile: body.businessProfile,
     firmMemory: firmRecord ? firmProfileToPromptBlock(firmRecord) : undefined,
     firmName: firmRecord?.answers.businessName,
+    agentBrainFiles,
   });
 
   const model = useOllama

@@ -113,6 +113,8 @@ export function stripNexusMarkers(text: string): string {
     .replace(/\[\[nexus:email:[^\]]+\]\]/g, "")
     .replace(/\[\[nexus:tasks:[^\]]+\]\]/g, "")
     .replace(/\[\[nexus:ask:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:doc:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:deliver:[^\]]+\]\]/g, "")
     .replace(/\n?\[\[nexus:view-brief:[^\]]+\]\]/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .trim();

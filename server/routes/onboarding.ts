@@ -14,6 +14,7 @@ import {
   validateOllamaModel,
 } from "../lib/ollama.js";
 import { loadFirmProfile, loadFirmProfileHtml, saveFirmProfile } from "../lib/firm-profile.js";
+import { syncSoulOfFirmFromProfile } from "../lib/agent-files.js";
 
 const onboarding = new Hono();
 
@@ -254,6 +255,8 @@ onboarding.put("/profile", async (c) => {
   }
   try {
     const record = await saveFirmProfile(parsed.data);
+    // Refresh the editable "soul of the firm" agent file from the new profile.
+    await syncSoulOfFirmFromProfile();
     return c.json({ saved: true, savedAt: record.savedAt });
   } catch (error) {
     console.error("Save firm profile error:", error);

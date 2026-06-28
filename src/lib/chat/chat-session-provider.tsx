@@ -19,6 +19,13 @@ import { useOnboardingStore } from "@/stores/onboarding-store";
 import { draftEmail as draftEmailApi, encodeEmailMarker } from "@/lib/email/client";
 import { proposeTasks as proposeTasksApi, encodeTasksMarker } from "@/lib/tasks/client";
 import { requestClarify, encodeClarifyMarker } from "@/lib/clarify/client";
+import { appendAgentNote } from "@/lib/agent-files/client";
+import {
+  encodeDocMarker,
+  encodeDeliveryMarker,
+  buildPremiseMarkdown,
+  slugifyFilename,
+} from "@/lib/docs/client";
 import { stripNexusMarkers } from "@/lib/chat/attachments";
 import type {
   AgentBrainStage,
@@ -286,6 +293,12 @@ interface ChatSessionContextValue {
   composeEmail: (instruction: string) => Promise<void>;
   proposeTasks: (instruction: string) => Promise<void>;
   submitClarifyAnswers: (request: string, answers: string) => Promise<void>;
+  submitDeliveryChoice: (
+    request: string,
+    premise: string,
+    choices: string[],
+    note: string,
+  ) => Promise<void>;
   decidePendingBriefPlan: (decision: "create" | "dismiss") => Promise<void>;
   stop: () => void;
 }
@@ -781,6 +794,8 @@ export function ChatSessionProvider({
 
     if (shouldPlanBrief) {
       setArtifactBusy(true);
+      // Show the user's message immediately while the brief plan is assembled.
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
       const planningRun = startAgentBrainRun({
         projectId: activeProjectId,
         sessionId,
@@ -807,6 +822,7 @@ export function ChatSessionProvider({
           confidence: 0.9,
           pinned: true,
         });
+        void appendAgentNote("memory.md", `Preference — ${project?.name ?? "workspace"}`, cleanText);
       }
       const modelPrompt = buildBriefPrompt(text, previousMessages, project?.name);
       const markdown = buildBriefPlanMarkdown({
@@ -924,6 +940,7 @@ export function ChatSessionProvider({
         confidence: 0.9,
         pinned: true,
       });
+      void appendAgentNote("memory.md", `Preference — ${project?.name ?? "workspace"}`, cleanText);
     }
     await chat.sendMessage({ text });
   };
@@ -989,6 +1006,18 @@ export function ChatSessionProvider({
   const runTaskProposal = async (instruction: string) => {
     if (!sessionId) return;
     setArtifactBusy(true);
+    // Render the user's message right away and show a descriptive status so the
+    // chat is never blank while the proposal request is in flight.
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    setActivities([
+      {
+        id: "task-proposal-status",
+        status: "running",
+        label: "Breaking this into tasks",
+        detail: "Turning your request into actionable tasks with owners.",
+        toolName: "task_proposal",
+      },
+    ]);
     const run = startAgentBrainRun({
       projectId: activeProjectId,
       sessionId,
@@ -1038,6 +1067,7 @@ export function ChatSessionProvider({
     } finally {
       activeBrainRunIdRef.current = null;
       setArtifactBusy(false);
+      setActivities([]);
     }
   };
 
@@ -1062,6 +1092,18 @@ export function ChatSessionProvider({
   const runClarify = async (instruction: string) => {
     if (!sessionId) return;
     setArtifactBusy(true);
+    // Render the user's message right away and show a descriptive status so the
+    // chat is never blank while the clarifying questions are being prepared.
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    setActivities([
+      {
+        id: "clarify-status",
+        status: "running",
+        label: "Preparing a few quick questions",
+        detail: "Reviewing your request and the project context first.",
+        toolName: "clarify",
+      },
+    ]);
     const run = startAgentBrainRun({
       projectId: activeProjectId,
       sessionId,
@@ -1104,6 +1146,7 @@ export function ChatSessionProvider({
     } finally {
       activeBrainRunIdRef.current = null;
       setArtifactBusy(false);
+      setActivities([]);
     }
   };
 
@@ -1119,6 +1162,88 @@ export function ChatSessionProvider({
     await runTaskProposal(
       `${request}\n\nThe user answered these intake questions:\n${answers}\n\nProduce a concrete set of tasks to execute this.`,
     );
+
+    // The logical next step after the answers + tasks: capture the premise as a
+    // .md document on the canvas, then Socratically confirm and ask how the user
+    // wants it delivered — and remember that preference.
+    const markdown = buildPremiseMarkdown({ request, answers, projectName: project?.name });
+    const docPayload = {
+      id: `doc-${crypto.randomUUID().slice(0, 8)}`,
+      filename: slugifyFilename(request),
+      title: `Premise — ${project?.name ?? "this work"}`,
+      markdown,
+    };
+    const deliveryPayload = {
+      request,
+      premise: stripNexusMarkers(request).slice(0, 240),
+      options: [
+        "Add the tasks to the board",
+        "Produce a full HTML brief",
+        "Keep this .md doc as the working doc",
+        "Let's revise the premise first",
+      ],
+    };
+    await persistChatMessage(
+      sessionId,
+      `I captured our premise as a document on the canvas — open it and tell me what's right and what's off.\n\n${encodeDocMarker(docPayload)}\n\n${encodeDeliveryMarker(deliveryPayload)}`,
+      "assistant",
+    );
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+
+    // Keep a running session note so the agent has continuity next time.
+    void appendAgentNote(
+      "session.md",
+      `${project?.name ?? "Session"} — ${stripNexusMarkers(request).slice(0, 80)}`,
+      `Request: ${stripNexusMarkers(request)}\n\nIntake answers:\n${answers}\n\nDelivered a premise doc and asked how to proceed.`,
+    );
+  };
+
+  // The user picked how they want the premise delivered. Record the preference,
+  // log the session, and execute the choice (tasks already on offer above; a
+  // brief is produced via the approval-gated flow; otherwise continue the
+  // conversation so the model carries it forward).
+  const submitDeliveryChoice = async (
+    request: string,
+    premise: string,
+    choices: string[],
+    note: string,
+  ) => {
+    if (!sessionId) return;
+    const chosen = choices.length ? choices.join(", ") : "use your best judgment";
+    const summary = [`Deliver this as: ${chosen}.`, note ? `Notes: ${note}` : ""]
+      .filter(Boolean)
+      .join(" ");
+    await persistChatMessage(sessionId, summary, "user");
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+
+    // Remember the delivery preference durably.
+    recordAgentMemory({
+      projectId: activeProjectId,
+      title: "Delivery preference",
+      body: `For "${stripNexusMarkers(request).slice(0, 120)}": ${chosen}.${note ? ` ${note}` : ""}`,
+      kind: "preference",
+      source: "user",
+      confidence: 0.85,
+      pinned: true,
+    });
+    void appendAgentNote(
+      "memory.md",
+      `Delivery preference — ${project?.name ?? "workspace"}`,
+      `${chosen}${note ? ` — ${note}` : ""}`,
+    );
+
+    if (choices.some((c) => /brief/i.test(c))) {
+      // Route into the approval-gated brief flow.
+      await send(`Produce a brief for: ${request}. ${note}`.trim());
+      return;
+    }
+
+    // Otherwise let the model acknowledge and carry the premise + preference
+    // forward conversationally (it has the premise context and the soul/agents
+    // files telling it to honor preferences and deliver accordingly).
+    await send(
+      `Premise confirmed. Deliver this as: ${chosen}.${note ? ` Adjust the premise: ${note}.` : ""} ${premise ? `Premise: ${premise}` : ""}`.trim(),
+    );
   };
 
   const value: ChatSessionContextValue = {
@@ -1132,6 +1257,7 @@ export function ChatSessionProvider({
     composeEmail,
     proposeTasks,
     submitClarifyAnswers,
+    submitDeliveryChoice,
     decidePendingBriefPlan,
     stop: chat.stop,
   };

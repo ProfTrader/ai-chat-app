@@ -9,6 +9,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { CursorAuthPanel } from "@/components/settings/cursor-auth-panel";
 import { OpenAiAuthPanel } from "@/components/settings/openai-auth-panel";
+import { AgentFilesPanel } from "@/components/settings/agent-files-panel";
 import { useAuthStore } from "@/stores/auth-store";
 import { useShellStore } from "@/stores/shell-store";
 
@@ -47,6 +48,13 @@ export function SettingsSheet() {
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium">Providers</h3>
             <OpenAiAuthPanel />
+          </section>
+
+          <Separator />
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">Agent brain files</h3>
+            <AgentFilesPanel />
           </section>
         </div>
       </SheetContent>

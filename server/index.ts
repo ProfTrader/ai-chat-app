@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "./routes/auth.js";
 import { agent } from "./routes/agent.js";
+import { agentFiles } from "./routes/agent-files.js";
 import { chat } from "./routes/chat.js";
 import { gateway } from "./routes/gateway.js";
 import { onboarding } from "./routes/onboarding.js";
@@ -27,6 +28,7 @@ app.use(
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api/auth", auth);
+app.route("/api/agent-files", agentFiles);
 app.route("/api/agent", agent);
 app.route("/api/chat", chat);
 app.route("/api/gateway", gateway);

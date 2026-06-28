@@ -12,7 +12,7 @@ How the app is built and how a request flows end-to-end. Pair this with **HANDOF
 | State | Zustand stores (some persisted) |
 | Chat | Vercel **AI SDK** (`@ai-sdk/react` `useChat`) over a UI message stream |
 | API server | **Hono** on Node (`@hono/node-server`), port 3001 |
-| LLM | **Moonshot / Kimi** (`kimi-k2.6`) via OpenAI-compatible REST; Ollama optional fallback |
+| LLM | **Moonshot / Kimi** (`kimi-k2.7` → aliased to `kimi-k2.7-code`) via OpenAI-compatible REST; Ollama optional fallback |
 | Persistence | Browser **IndexedDB** (+ localStorage fallback); server `.data/*` files; Tauri **SQLite** in desktop builds |
 | Desktop (optional) | Tauri 2 |
 
@@ -37,8 +37,9 @@ How the app is built and how a request flows end-to-end. Pair this with **HANDOF
 │ /api/tasks     task breakdown for the board (JSON)                        │
 │ /api/email     email draft (JSON)                                         │
 │ /api/onboarding research the firm + save/serve firm-profile.json/.html    │
+│ /api/agent-files  read/write the 5 agent brain files (.data/agent/*.md)    │
 │ /api/agent     brief artifact generation (currently dormant)              │
-│ lib: moonshot · ollama · auth · context (system prompt) · firm-profile    │
+│ lib: moonshot · ollama · auth · context (prompt) · firm-profile · agent-files │
 └───────────────────────────────┬───────────────────────────────────────────┘
                                  │  HTTPS (Bearer key)
                          Moonshot API  (api.moonshot.ai/v1)
@@ -59,9 +60,11 @@ Onboarding ──► Firm profile (the "soul")         (research via /api/onboar
         │
         ├─ "plan/brief/build…"  ──► interactive multiple-choice questions (card)
         │         └─ user taps answers ──► task-proposal FLOW
-        │                                    └─ "Add to board" ⇒ tasks (team-assigned)
-        │                                         + brief linked to a task
-        │                                         + notifications ──► INBOX
+        │                                    ├─ "Add to board" ⇒ tasks (team-assigned)
+        │                                    │      + brief linked to a task
+        │                                    │      + notifications ──► INBOX
+        │                                    └─ premise .md on the canvas ──► Socratic confirm
+        │                                           └─ "how to deliver?" card ⇒ saved to memory.md
         ├─ "create tasks…"      ──► task proposal card ──► board
         ├─ ✉ Draft email        ──► email artifact card (copy / open in mail)
         └─ 📎 drag files         ──► attachments sent as context
@@ -114,9 +117,15 @@ Artifacts are embedded in assistant/user message text and rendered inline by
 | `ask` | InteractiveQuestions | [lib/clarify/client.ts](src/lib/clarify/client.ts) |
 | `tasks` | TaskProposalArtifact | [lib/tasks/client.ts](src/lib/tasks/client.ts) |
 | `email` | EmailArtifact | [lib/email/client.ts](src/lib/email/client.ts) |
+| `doc` | DocArtifact (premise `.md` on a canvas + download) | [lib/docs/client.ts](src/lib/docs/client.ts) |
+| `deliver` | DeliveryChoice (how to deliver the premise) | [lib/docs/client.ts](src/lib/docs/client.ts) |
 | `view-brief` | "View on canvas" link | brief flow (dormant) |
 
 `stripNexusMarkers()` removes these for display, titles, and the model context.
+
+The **clarify → premise → deliver** flow (in `chat-session-provider.tsx`): after the intake answers
+the agent proposes tasks, then writes a `doc` (the premise) to the canvas and a `deliver` card; the
+chosen delivery option is saved to the agent's `memory.md` and executed.
 
 ### Views (`src/components/workspace`)
 `MainWorkspace` switches on `activeView`: **chat** (or **InboxWorkspace** when sidebarMode=inbox),
@@ -138,21 +147,39 @@ profile** → parse strict JSON → return.
 - **`/api/tasks/propose`** — returns `{ tasks[{title, description, priority, status, assignee, dueDate}] }`.
 - **`/api/email/draft`** — returns `{ to, subject, body }`.
 - **`/api/onboarding`** — `research` (build profile), `PUT/GET profile`, `GET profile.html`.
+  Saving the profile also re-seeds `soul-of-firm.md` (`syncSoulOfFirmFromProfile`).
+- **`/api/agent-files`** ([routes/agent-files.ts](server/routes/agent-files.ts)) — `GET` list, `GET/PUT
+  :name`, `POST :name/append`. Backs the Settings "Agent brain files" panel and the agent's self-updates.
 - **`lib/moonshot.ts`** — the streaming + completion calls. kimi-k2 needs `temperature:1` and
   `max_completion_tokens: 8192`.
 - **`lib/firm-profile.ts`** — read/write `.data/firm-profile.{json,html}` and the prompt block.
-- **`lib/auth.ts`** — model/key resolution; `resolveMoonshotModel` ignores non-Moonshot model names
-  (so a stale `OLLAMA_MODEL` from a client can't break chat).
+- **`lib/agent-files.ts`** — read/write/seed the 5 `.data/agent/*.md` files + `agentFilesPromptBlock()`
+  (the authoritative soul+memory block injected into every system prompt).
+- **`lib/auth.ts`** — model/key resolution; `resolveMoonshotModel` aliases `kimi-k2.7`→`kimi-k2.7-code`
+  and ignores non-Moonshot model names (so a stale `OLLAMA_MODEL` from a client can't break chat).
 
 ---
 
-## 6. Personalization — "soul of the firm"
+## 6. Personalization — "soul of the firm" + the agent brain files
 
 Onboarding researches the business and persists a **firm profile** server-side. On **every** chat
 message, `/api/chat` loads it and injects a `FIRM MEMORY` block into the system prompt, so replies,
 emails, questions, and task breakdowns all reference the firm's industry, goals, ICP, and competitors
 by name. The workspace itself starts empty (no mock CRM data) — the agent only references real data in
 the context pack.
+
+On top of that, the agent carries **five editable markdown files** (`.data/agent/`, surfaced in
+**Settings → Agent brain files**), injected via `agentFilesPromptBlock()`:
+
+- `soul-of-agent.md` — identity, values, voice, boundaries (separated from task context).
+- `soul-of-firm.md` — the firm's living soul (re-seeded from onboarding unless hand-edited).
+- `agents.md` — the operating manual (the clarify→premise→deliver workflow, skills, house rules).
+- `memory.md` — durable facts + preferences; the agent **appends** on stated preferences and delivery choices.
+- `session.md` — a running session log appended after each premise is delivered.
+
+Pattern (Hermes-agent style): **identity** (soul) is kept separate from **learned facts** (memory)
+from **procedure** (agents.md). Users can edit any file to steer the agent; an "agent" badge marks
+files the agent last touched.
 
 ---
 
@@ -176,22 +203,29 @@ src/
     composer/ chat-composer (send, attach, email, tasks, drag-drop)
     workspace/ chat-thread, chat-message, kanban-board, task-list,
                inbox-workspace, interactive-questions, task-proposal-artifact,
-               email-artifact, briefs-workspace, node-manager (agent builder)
+               email-artifact, doc-artifact, delivery-choice,
+               briefs-workspace, node-manager (agent builder)
+    settings/ settings-sheet, cursor/openai auth panels, agent-files-panel
     onboarding/ onboarding-flow
     inspector/ inspector-panel, agent-brain-panel
     ui/       shadcn primitives (bubble, attachment, message, button, …)
   lib/
     chat/     chat-session-provider, attachments
     clarify/  tasks/  email/  onboarding/   (per-artifact API clients + markers)
+    docs/         premise-doc + delivery markers (encode/parse, buildPremiseMarkdown)
+    agent-files/  client for the 5 agent brain files
     db/  browser-db/   firm-profile (client side via onboarding)
     agents/   brain, runtime, knowledge-packs (legacy brief/agent engine)
   stores/     data, selection, shell, chat, auth, onboarding
-  styles/globals.css   Tailwind v4 + OKLCH tokens (dark "Studio" theme)
+  styles/globals.css   Tailwind v4 + OKLCH tokens (dark "Studio" theme; .fade-text-r helper)
   types/index.ts       shared types (Task, Project, AppNotification, …)
 server/
   index.ts             Hono app + route mounting
-  routes/   auth, chat, clarify, tasks, email, onboarding, agent, gateway
-  lib/      moonshot, ollama, auth, context, firm-profile, cursor
+  routes/   auth, chat, clarify, tasks, email, onboarding, agent, agent-files, gateway
+  lib/      moonshot, ollama, auth, context, firm-profile, agent-files, cursor
+.data/                 server state (gitignored)
+  firm-profile.{json,html}     the firm "soul" from onboarding
+  agent/*.md + .meta.json      the 5 agent brain files (soul/agents/memory/session)
 ```
 
 ---

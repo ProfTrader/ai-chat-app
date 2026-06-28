@@ -91,6 +91,9 @@ export const chatContextSchema = z.object({
   // Authoritative firm "soul" loaded server-side from the saved firm profile.
   firmMemory: z.string().optional(),
   firmName: z.string().optional(),
+  // The agent's durable soul + memory files (soul-of-agent/firm, agents.md,
+  // memory.md, session.md), pre-rendered as an authoritative prompt block.
+  agentBrainFiles: z.string().optional(),
 });
 
 export type ChatContext = z.infer<typeof chatContextSchema>;
@@ -215,13 +218,15 @@ export function buildSystemPrompt(context: ChatContext): string {
       ? "Respond with structured plans, numbered steps, and clear rationale. Ask clarifying questions when scope is ambiguous."
       : "Respond concisely with actionable CRM guidance. Prefer bullet points and direct recommendations.";
 
+  const agentBrainFiles = context.agentBrainFiles?.trim();
+
   return `You are Dexter, the dedicated AI operator for ${firmName} inside Nexus CRM. You should feel like a sharp teammate in the room who knows this firm cold — not a generic assistant or ticket bot.
 
 Workspace: ${context.workspaceName ?? "Acme Corp"}
 Project: ${context.projectName ?? "Unknown"} (${context.projectSlug ?? "n/a"})
 Session: ${context.sessionId}
 Composer mode: ${context.composerMode}
-
+${agentBrainFiles ? `\n${agentBrainFiles}\n` : ""}
 FIRM MEMORY — the durable profile of ${firmName} you work for (always honor and reference this):
 ${businessSection}
 

@@ -16,10 +16,13 @@ import { Button } from "@/components/ui/button";
 import { EmailArtifact } from "@/components/workspace/email-artifact";
 import { TaskProposalArtifact } from "@/components/workspace/task-proposal-artifact";
 import { InteractiveQuestions } from "@/components/workspace/interactive-questions";
+import { DocArtifact } from "@/components/workspace/doc-artifact";
+import { DeliveryChoice } from "@/components/workspace/delivery-choice";
 import { parseMessageAttachments, formatBytes } from "@/lib/chat/attachments";
 import { parseEmailMarker } from "@/lib/email/client";
 import { parseTasksMarker } from "@/lib/tasks/client";
 import { parseClarifyMarker } from "@/lib/clarify/client";
+import { parseDocMarker, parseDeliveryMarker } from "@/lib/docs/client";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
   Message,
@@ -172,7 +175,9 @@ export function ChatMessage({
   const { cleanText: textWithoutEmail } = parseEmailMarker(textWithoutFiles);
   const { cleanText: textWithoutTasks } = parseTasksMarker(textWithoutEmail);
   const { cleanText: textWithoutAsk } = parseClarifyMarker(textWithoutTasks);
-  const { runId, cleanText } = parseViewBriefMarker(textWithoutAsk);
+  const { cleanText: textWithoutDoc } = parseDocMarker(textWithoutAsk);
+  const { cleanText: textWithoutDeliver } = parseDeliveryMarker(textWithoutDoc);
+  const { runId, cleanText } = parseViewBriefMarker(textWithoutDeliver);
   const selectWorkRun = useDataStore((state) => state.selectWorkRun);
   const setActiveView = useShellStore((state) => state.setActiveView);
 
@@ -242,8 +247,20 @@ export function ChatMessage({
                 parseTasksMarker(textWithoutEmailPart);
               const { payload: clarifyPayload, cleanText: textWithoutAskPart } =
                 parseClarifyMarker(textWithoutTasksPart);
-              const partText = parseViewBriefMarker(textWithoutAskPart).cleanText;
-              if (!partText && !email && !proposedTasks && !clarifyPayload) return null;
+              const { payload: docPayload, cleanText: textWithoutDocPart } =
+                parseDocMarker(textWithoutAskPart);
+              const { payload: deliveryPayload, cleanText: textWithoutDeliverPart } =
+                parseDeliveryMarker(textWithoutDocPart);
+              const partText = parseViewBriefMarker(textWithoutDeliverPart).cleanText;
+              if (
+                !partText &&
+                !email &&
+                !proposedTasks &&
+                !clarifyPayload &&
+                !docPayload &&
+                !deliveryPayload
+              )
+                return null;
 
               return (
                 <div key={`${part.type}-${index}`} className="flex flex-col gap-2">
@@ -259,6 +276,8 @@ export function ChatMessage({
                     <TaskProposalArtifact tasks={proposedTasks} />
                   )}
                   {clarifyPayload && <InteractiveQuestions payload={clarifyPayload} />}
+                  {docPayload && <DocArtifact payload={docPayload} />}
+                  {deliveryPayload && <DeliveryChoice payload={deliveryPayload} />}
                 </div>
               );
             })}

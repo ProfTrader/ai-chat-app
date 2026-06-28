@@ -216,7 +216,7 @@ function ModuleButton({
       onClick={onClick}
     >
       <Icon data-icon="inline-start" />
-      <span className="truncate">{label}</span>
+      <span className="fade-text-r min-w-0 flex-1 text-left">{label}</span>
       <NotificationBadge count={count} />
     </Button>
   );
@@ -353,7 +353,7 @@ function ProjectFileItem({
       onClick={onClick}
     >
       <Icon data-icon="inline-start" />
-      <span className="truncate">{label}</span>
+      <span className="fade-text-r min-w-0 flex-1 text-left">{label}</span>
       <NotificationBadge count={count} />
     </Button>
   );
@@ -377,7 +377,7 @@ function ProjectChatItem({
   return (
     <div
       className={cn(
-        "flex h-8 w-full items-center gap-1 rounded-md px-2 text-sm",
+        "relative flex h-8 w-full items-center overflow-hidden rounded-md px-2 text-sm",
         isActive
           ? "bg-active-soft text-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -385,46 +385,48 @@ function ProjectChatItem({
     >
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="flex h-full min-w-0 flex-1 items-center gap-2 pr-12 text-left"
         onClick={onOpen}
       >
         <MessageSquare className="size-3.5 shrink-0" />
-        <span className="truncate">Chat</span>
+        <span className="fade-text-r min-w-0 flex-1">Chat</span>
         <NotificationBadge count={count} />
       </button>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground"
-              aria-label="New chat in project"
-              onClick={onCreate}
-            />
-          }
-        >
-          <Plus />
-        </TooltipTrigger>
-        <TooltipContent>New chat</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground"
-              disabled={!canArchive}
-              aria-label="Archive active project chat"
-              onClick={onArchive}
-            />
-          }
-        >
-          <Archive />
-        </TooltipTrigger>
-        <TooltipContent>Archive active chat</TooltipContent>
-      </Tooltip>
+      <div className="absolute right-1 flex items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label="New chat in project"
+                onClick={onCreate}
+              />
+            }
+          >
+            <Plus />
+          </TooltipTrigger>
+          <TooltipContent>New chat</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                disabled={!canArchive}
+                aria-label="Archive active project chat"
+                onClick={onArchive}
+              />
+            }
+          >
+            <Archive />
+          </TooltipTrigger>
+          <TooltipContent>Archive active chat</TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 }
@@ -445,7 +447,7 @@ function SessionTreeRow({
   return (
     <div
       className={cn(
-        "group flex h-8 w-full items-center gap-1 rounded-md pr-1 text-sm font-normal",
+        "group/session relative flex h-8 w-full items-center overflow-hidden rounded-md pr-1 text-sm font-normal",
         isActive
           ? "bg-muted text-foreground"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -453,7 +455,7 @@ function SessionTreeRow({
     >
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-6 text-left"
+        className="flex h-full min-w-0 flex-1 items-center gap-2 py-1.5 pl-6 text-left"
         onClick={onClick}
       >
         {session.pinned ? (
@@ -461,10 +463,10 @@ function SessionTreeRow({
         ) : (
           <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
         )}
-        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+        <span className="fade-text-r min-w-0 flex-1">{session.title}</span>
         <NotificationBadge count={unreadCount} />
         {!unreadCount ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground">
+          <span className="shrink-0 text-[11px] text-muted-foreground transition-opacity group-hover/session:opacity-0">
             {formatRelativeTime(session.updatedAt)}
           </span>
         ) : null}
@@ -475,7 +477,7 @@ function SessionTreeRow({
             <Button
               variant="ghost"
               size="icon-xs"
-              className="text-muted-foreground"
+              className="absolute right-1 text-muted-foreground opacity-0 transition-opacity group-hover/session:opacity-100 focus-visible:opacity-100"
               aria-label={`Archive ${session.title}`}
               onClick={onArchive}
             />
@@ -624,7 +626,7 @@ function ProjectTreeItem({
             <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
           )}
           <FolderOpen className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
+          <span className="fade-text-r min-w-0 flex-1 text-left text-sm font-medium">
             {project.name}
           </span>
           <NotificationBadge count={unreadCount} />
@@ -1249,7 +1251,7 @@ export function NavSidebar() {
   };
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[224px_minmax(220px,1fr)] overflow-hidden bg-pane">
+    <div className="grid h-full min-w-0 grid-cols-[200px_minmax(0,1fr)] overflow-hidden bg-pane">
       <aside className="flex min-w-0 flex-col border-r border-border">
         <WorkspaceButton />
         <div className="flex min-h-0 flex-1 flex-col gap-4 py-3">
