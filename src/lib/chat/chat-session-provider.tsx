@@ -15,6 +15,11 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
+import { useOnboardingStore } from "@/stores/onboarding-store";
+import { draftEmail as draftEmailApi, encodeEmailMarker } from "@/lib/email/client";
+import { proposeTasks as proposeTasksApi, encodeTasksMarker } from "@/lib/tasks/client";
+import { requestClarify, encodeClarifyMarker } from "@/lib/clarify/client";
+import { stripNexusMarkers } from "@/lib/chat/attachments";
 import type {
   AgentBrainStage,
   Contact,
@@ -40,39 +45,43 @@ function uiMessageToText(message: UIMessage) {
     .join("\n");
 }
 
-function messageContent(message: Message) {
-  return message.content.toLowerCase();
-}
-
-function hasRecentBriefContext(messages: Message[]) {
-  return messages
-    .slice(-8)
-    .some((message) =>
-      /\b(brief|breif|research memo|memo|report|dossier|artifact|study|research findings)\b/.test(
-        messageContent(message),
-      ),
-    );
-}
-
-function shouldRouteToBrief(text: string, previousMessages: Message[]) {
-  const input = text.toLowerCase().replace(/\s+/g, " ").trim();
-  if (shouldRememberUserInstruction(input)) return false;
-  const artifactIntent = /\b(brief|breif|research memo|memo|report|dossier|artifact|study|research findings)\b/.test(input);
-  const createIntent = /\b(build|create|draft|make|generate|write|prepare|produce|turn|convert|give|compose|do)\b/.test(input) || /\bput together\b/.test(input);
-  const analysisBriefIntent = /\b(analysis|analyze|research)\b/.test(input) && /\b(next|plan|recommend|what to do|summary)\b/.test(input);
-  const bareBriefIntent = artifactIntent && /\b(general|overall|status|research|findings|next|it|that|this)\b/.test(input);
-  const continuationIntent =
-    hasRecentBriefContext(previousMessages) &&
-    /\b(brief|breif|research|findings|general|overall|status|next|it|that|this|give me|do it|go ahead)\b/.test(input) &&
-    !/^(what|why|when|where|who|how)\b/.test(input);
-
-  return (artifactIntent && (createIntent || analysisBriefIntent || bareBriefIntent)) || continuationIntent;
+function shouldRouteToBrief(_text: string, _previousMessages: Message[]) {
+  // Deterministic brief auto-planning is disabled: "create a plan / brief"
+  // requests now go to the real LLM, which asks grounded clarifying questions
+  // (using the firm profile) instead of emitting a predetermined plan with mock
+  // datasets. Briefs can be reintroduced later as a model-driven flow.
+  return false;
 }
 
 function isBriefApproval(text: string) {
   return /\b(approve|approved|proceed|go ahead|create it|generate it|build it|make it|start production|run it)\b/i.test(
     text,
   );
+}
+
+function shouldRouteToTasks(text: string) {
+  const input = text.toLowerCase();
+  const createVerb =
+    /\b(create|add|make|set up|generate|spin up|break down|break (?:this|it|that) (?:down |up )?into|turn (?:this|it|that) into|draft|plan out|list)\b/.test(
+      input,
+    );
+  const taskNoun =
+    /\b(tasks?|to-?dos?|action items?|tickets?|checklist|board cards?|sub-?tasks?)\b/.test(input);
+  return createVerb && taskNoun;
+}
+
+// Planning/build requests go through an interactive multiple-choice intake first.
+function shouldClarify(text: string) {
+  const input = text.toLowerCase();
+  const buildVerb =
+    /\b(create|draft|build|make|plan|design|put together|prepare|develop|launch|set up|write|outline|map out)\b/.test(
+      input,
+    );
+  const deliverable =
+    /\b(plan|brief|strategy|campaign|roadmap|launch|proposal|project|go-to-market|gtm|playbook|initiative|program|workflow|onboarding flow|funnel)\b/.test(
+      input,
+    );
+  return buildVerb && deliverable;
 }
 
 function slugify(value: string) {
@@ -274,6 +283,9 @@ interface ChatSessionContextValue {
   pendingBriefPlan: PendingArtifactPlan | null;
   artifactBusy: boolean;
   send: (text: string) => Promise<void>;
+  composeEmail: (instruction: string) => Promise<void>;
+  proposeTasks: (instruction: string) => Promise<void>;
+  submitClarifyAnswers: (request: string, answers: string) => Promise<void>;
   decidePendingBriefPlan: (decision: "create" | "dismiss") => Promise<void>;
   stop: () => void;
 }
@@ -344,6 +356,8 @@ export function ChatSessionProvider({
   const pendingArtifactPlans = useDataStore((s) => s.pendingArtifactPlans);
   const { projectId, contextChips } = useSelectionStore();
   const { composerMode } = useChatStore();
+  const onboardingProfile = useOnboardingStore((s) => s.profile);
+  const onboardingAnswers = useOnboardingStore((s) => s.answers);
   const { status: authStatus } = useAuthStore();
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
   const setAgentWorking = useShellStore((s) => s.setAgentWorking);
@@ -454,9 +468,20 @@ export function ChatSessionProvider({
                   .slice(-8)
                   .map((message) => ({
                     role: message.role,
-                    content: message.content,
+                    content: stripNexusMarkers(message.content),
                   }))
+                  .filter((message) => message.content.trim().length > 0)
               : [],
+            businessProfile: onboardingProfile
+              ? {
+                  businessName: onboardingAnswers?.businessName,
+                  summary: onboardingProfile.summary,
+                  industry: onboardingProfile.industry,
+                  businessModel: onboardingProfile.businessModel,
+                  valueProposition: onboardingProfile.valueProposition,
+                  targetCustomers: onboardingProfile.targetCustomers,
+                }
+              : undefined,
           },
         }),
       }),
@@ -469,6 +494,8 @@ export function ChatSessionProvider({
       datasets,
       getMessagesBySession,
       getTasksByProject,
+      onboardingAnswers,
+      onboardingProfile,
       project?.name,
       project?.slug,
       projectId,
@@ -737,16 +764,19 @@ export function ChatSessionProvider({
     }
 
     setActivities([]);
+    // Display/title/intent uses text without nexus markers; the model still
+    // receives the full `text` (with attachment file blocks) via sendMessage.
+    const cleanText = stripNexusMarkers(text);
     const previousMessages = getMessagesBySession(sessionId);
     await persistChatMessage(sessionId, text, "user");
-    const approvedBriefPlan = pendingBriefPlan && isBriefApproval(text) ? pendingBriefPlan : null;
+    const approvedBriefPlan = pendingBriefPlan && isBriefApproval(cleanText) ? pendingBriefPlan : null;
     const shouldPlanBrief =
       !approvedBriefPlan &&
-      shouldRouteToBrief(text, previousMessages);
+      shouldRouteToBrief(cleanText, previousMessages);
 
     const sessionMessages = getMessagesBySession(sessionId);
     if (sessionMessages.filter((m) => m.role === "user").length === 1) {
-      void updateSessionTitle(sessionId, text);
+      void updateSessionTitle(sessionId, cleanText);
     }
 
     if (shouldPlanBrief) {
@@ -754,7 +784,7 @@ export function ChatSessionProvider({
       const planningRun = startAgentBrainRun({
         projectId: activeProjectId,
         sessionId,
-        request: text,
+        request: cleanText,
         title: "Brief planning run",
         intent: "brief",
         outputKind: "plan",
@@ -772,7 +802,7 @@ export function ChatSessionProvider({
           projectId: activeProjectId,
           runId: planningRun.id,
           title: "User instruction",
-          body: text,
+          body: cleanText,
           source: "user",
           confidence: 0.9,
           pinned: true,
@@ -855,10 +885,23 @@ export function ChatSessionProvider({
       return;
     }
 
+    // Natural-language "create tasks…" routes to the task-proposal artifact
+    // (the user message is already persisted above).
+    if (shouldRouteToTasks(cleanText)) {
+      await runTaskProposal(cleanText);
+      return;
+    }
+
+    // Planning/build requests open an interactive multiple-choice intake first.
+    if (shouldClarify(cleanText)) {
+      await runClarify(cleanText);
+      return;
+    }
+
     const chatRun = startAgentBrainRun({
       projectId: activeProjectId,
       sessionId,
-      request: text,
+      request: cleanText,
       title: "Chat response run",
       intent: "conversation",
       outputKind: "conversation",
@@ -876,13 +919,206 @@ export function ChatSessionProvider({
         projectId: activeProjectId,
         runId: chatRun.id,
         title: "User instruction",
-        body: text,
+        body: cleanText,
         source: "user",
         confidence: 0.9,
         pinned: true,
       });
     }
     await chat.sendMessage({ text });
+  };
+
+  const composeEmail = async (instruction: string) => {
+    if (!sessionId) {
+      toast.error("Select or create a session first.");
+      return;
+    }
+    if (!authStatus?.connected) {
+      toast.warning("Connect a model to draft emails.");
+      setSettingsOpen(true);
+      return;
+    }
+
+    setActivities([]);
+    await persistChatMessage(sessionId, instruction, "user");
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+
+    setArtifactBusy(true);
+    const run = startAgentBrainRun({
+      projectId: activeProjectId,
+      sessionId,
+      request: instruction,
+      title: "Email draft",
+      intent: "conversation",
+      outputKind: "conversation",
+      model: authStatus?.model,
+    });
+    activeBrainRunIdRef.current = run.id;
+    advanceAgentBrainRun(
+      run.id,
+      "execute_tools",
+      "Drafting email",
+      "Writing an email in the firm voice from your instruction.",
+    );
+
+    try {
+      const draft = await draftEmailApi(instruction);
+      await persistChatMessage(
+        sessionId,
+        `Here's a draft email ready to review and send.\n\n${encodeEmailMarker(draft)}`,
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      advanceAgentBrainRun(run.id, "deliver", "Email drafted", draft.subject);
+      recordAgentObservation(run.id, "Email draft", draft.subject, []);
+      completeAgentBrainRun(run.id);
+    } catch (error) {
+      completeAgentBrainRun(
+        run.id,
+        "failed",
+        error instanceof Error ? error.message : "Email draft failed.",
+      );
+      toast.error(error instanceof Error ? error.message : "Failed to draft email.");
+    } finally {
+      activeBrainRunIdRef.current = null;
+      setArtifactBusy(false);
+    }
+  };
+
+  // Generate the task-proposal artifact for an already-persisted user instruction.
+  const runTaskProposal = async (instruction: string) => {
+    if (!sessionId) return;
+    setArtifactBusy(true);
+    const run = startAgentBrainRun({
+      projectId: activeProjectId,
+      sessionId,
+      request: instruction,
+      title: "Task proposal",
+      intent: "task_proposal",
+      outputKind: "task_proposal",
+      model: authStatus?.model,
+    });
+    activeBrainRunIdRef.current = run.id;
+    advanceAgentBrainRun(
+      run.id,
+      "execute_tools",
+      "Proposing tasks",
+      "Breaking your request into actionable tasks for the board.",
+    );
+
+    try {
+      const team = projectId
+        ? teamMembers.filter((member) => member.projectId === projectId).map((member) => member.name)
+        : [];
+      const existing = projectId
+        ? getTasksByProject(projectId).map((task) => task.title).slice(0, 30)
+        : [];
+      const proposed = await proposeTasksApi({
+        instruction,
+        projectName: project?.name,
+        team,
+        existingTasks: existing,
+      });
+      await persistChatMessage(
+        sessionId,
+        `I broke that into ${proposed.length} task${proposed.length === 1 ? "" : "s"} you can add to the board.\n\n${encodeTasksMarker(proposed)}`,
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      advanceAgentBrainRun(run.id, "deliver", "Tasks proposed", `${proposed.length} tasks ready for the board.`);
+      recordAgentObservation(run.id, "Task proposal", `${proposed.length} tasks proposed.`, []);
+      completeAgentBrainRun(run.id);
+    } catch (error) {
+      completeAgentBrainRun(
+        run.id,
+        "failed",
+        error instanceof Error ? error.message : "Task proposal failed.",
+      );
+      toast.error(error instanceof Error ? error.message : "Failed to propose tasks.");
+    } finally {
+      activeBrainRunIdRef.current = null;
+      setArtifactBusy(false);
+    }
+  };
+
+  const proposeTasks = async (instruction: string) => {
+    if (!sessionId) {
+      toast.error("Select or create a session first.");
+      return;
+    }
+    if (!authStatus?.connected) {
+      toast.warning("Connect a model to propose tasks.");
+      setSettingsOpen(true);
+      return;
+    }
+
+    setActivities([]);
+    await persistChatMessage(sessionId, instruction, "user");
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    await runTaskProposal(instruction);
+  };
+
+  // Build the interactive multiple-choice intake for a planning/build request.
+  const runClarify = async (instruction: string) => {
+    if (!sessionId) return;
+    setArtifactBusy(true);
+    const run = startAgentBrainRun({
+      projectId: activeProjectId,
+      sessionId,
+      request: instruction,
+      title: "Clarifying questions",
+      intent: "conversation",
+      outputKind: "conversation",
+      model: authStatus?.model,
+    });
+    activeBrainRunIdRef.current = run.id;
+    advanceAgentBrainRun(
+      run.id,
+      "plan",
+      "Preparing questions",
+      "Building a few quick multiple-choice questions before producing the deliverable.",
+    );
+    try {
+      const plan = await requestClarify(instruction, project?.name);
+      await persistChatMessage(
+        sessionId,
+        encodeClarifyMarker({ request: instruction, plan }),
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      advanceAgentBrainRun(
+        run.id,
+        "deliver",
+        "Questions ready",
+        `${plan.questions.length} quick questions awaiting your answers.`,
+      );
+      completeAgentBrainRun(run.id, "needs_approval");
+    } catch (error) {
+      completeAgentBrainRun(
+        run.id,
+        "failed",
+        error instanceof Error ? error.message : "Failed to prepare questions.",
+      );
+      // Fall back to a normal answer so the user is never stuck.
+      await chat.sendMessage({ text: instruction });
+    } finally {
+      activeBrainRunIdRef.current = null;
+      setArtifactBusy(false);
+    }
+  };
+
+  // After the interactive questions are answered, turn the request + answers
+  // into an actionable flow proposal (tasks for the board, which can then be
+  // assigned, briefed, and notified on approval).
+  const submitClarifyAnswers = async (request: string, answers: string) => {
+    if (!sessionId || !authStatus?.connected) return;
+    setActivities([]);
+    const answersText = `My answers:\n${answers}`;
+    await persistChatMessage(sessionId, answersText, "user");
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    await runTaskProposal(
+      `${request}\n\nThe user answered these intake questions:\n${answers}\n\nProduce a concrete set of tasks to execute this.`,
+    );
   };
 
   const value: ChatSessionContextValue = {
@@ -893,6 +1129,9 @@ export function ChatSessionProvider({
     pendingBriefPlan,
     artifactBusy,
     send,
+    composeEmail,
+    proposeTasks,
+    submitClarifyAnswers,
     decidePendingBriefPlan,
     stop: chat.stop,
   };

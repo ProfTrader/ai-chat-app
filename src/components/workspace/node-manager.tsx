@@ -20,6 +20,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useTheme } from "next-themes";
 import {
   AlertTriangle,
   Bot,
@@ -484,6 +485,7 @@ const fitViewOptions = {
 };
 
 export function NodeManager() {
+  const { resolvedTheme } = useTheme();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<BuilderMode>("build");
   const [libraryMenu, setLibraryMenu] = useState<LibraryMenu>("templates");
@@ -1085,6 +1087,7 @@ export function NodeManager() {
           <div ref={flowPaneRef} className="relative h-full min-h-0 min-w-0 flex-1 bg-shell">
             <ReactFlowProvider>
               <ReactFlow
+                colorMode={resolvedTheme === "light" ? "light" : "dark"}
                 nodes={renderedFlowNodes}
                 edges={[]}
                 nodeTypes={nodeTypes}

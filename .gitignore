@@ -26,3 +26,11 @@ dist-ssr
 # Server secrets and session data
 server/.env
 .data/
+
+# Local env files with secrets (keep .env.example tracked)
+.env
+.env.local
+.env.*.local
+
+# Local Claude Code settings (machine-specific, may hold local overrides)
+.claude/settings.local.json

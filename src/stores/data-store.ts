@@ -15,6 +15,7 @@ import type {
   AgentMemoryNote,
   AgentObservation,
   AgentRun,
+  AppNotification,
   ArtifactDeliveryStage,
   Contact,
   DatasetSemanticRole,
@@ -66,13 +67,6 @@ import {
   streamBriefWithLocalModel,
   type ArtifactStreamEvent,
 } from "@/lib/agents/client";
-import {
-  mockContacts,
-  mockProjects,
-  mockTasks,
-  mockTeamMembers,
-  mockWorkspaces,
-} from "@/lib/mock-data";
 import { enrichContacts, enrichTeamMember } from "@/lib/person-profiles";
 import {
   buildAgentContextPack,
@@ -130,6 +124,11 @@ interface DataState {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   archiveSession: (sessionId: string) => void;
   addProject: (name: string, workspaceId: string) => Promise<Project>;
+  applyFirmName: (name: string) => void;
+  notifications: AppNotification[];
+  addNotification: (notification: Omit<AppNotification, "id" | "read" | "createdAt">) => void;
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
   archiveProject: (projectId: string) => void;
   importCsvDataset: (
     projectId: string,
@@ -267,6 +266,7 @@ type PersistedDataPayload = {
   actionProposals?: AgentActionProposal[];
   taskActivities?: TaskActivity[];
   roadmapItems?: RoadmapItem[];
+  notifications?: AppNotification[];
   selectedWorkRunId?: string | null;
 };
 
@@ -389,25 +389,41 @@ function attachDeliveryStagesToLatestDraft({
   };
 }
 
-function seedTaskActivities(): TaskActivity[] {
-  return mockTasks.slice(0, 5).map((task, index) => ({
-    id: generateId("activity"),
-    projectId: task.projectId,
-    taskId: task.id,
-    type: task.status === "done" ? "status_changed" : "task_created",
-    title: task.status === "done" ? `${task.identifier} completed` : `${task.identifier} created`,
-    description:
-      task.status === "done"
-        ? `${task.title} moved to done.`
-        : `${task.title} is on the project board.`,
-    actor: index % 2 === 0 ? "System" : "User",
-    createdAt: new Date(Date.now() - index * 86_400_000).toISOString(),
-  }));
+const seedTaskActivityItems: TaskActivity[] = [];
+const seedRoadmapItems: RoadmapItem[] = [];
+const ARTIFACT_SCHEMA_VERSION = 8;
+
+/** Predefined team workspaces — a ready-made template, not mock data. */
+const TEAM_PROJECTS: Project[] = [
+  { id: "proj-risk", workspaceId: "ws-1", name: "Risk Team", slug: "risk" },
+  { id: "proj-marketing", workspaceId: "ws-1", name: "Marketing Team", slug: "marketing" },
+  { id: "proj-operations", workspaceId: "ws-1", name: "Operations Team", slug: "operations" },
+  { id: "proj-sales", workspaceId: "ws-1", name: "Sales Team", slug: "sales" },
+  { id: "proj-product", workspaceId: "ws-1", name: "Product Team", slug: "product" },
+];
+
+/** Firm name from the persisted onboarding store, so a fresh workspace is named after the firm. */
+function readFirmName(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem("crm-onboarding");
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { state?: { answers?: { businessName?: string } } };
+    const name = parsed?.state?.answers?.businessName;
+    return typeof name === "string" && name.trim() ? name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-const seedTaskActivityItems = seedTaskActivities();
-const seedRoadmapItems: RoadmapItem[] = [];
-const ARTIFACT_SCHEMA_VERSION = 6;
+/** A clean, mock-free starting workspace (named after the firm when available). */
+function defaultWorkspaces(): Workspace[] {
+  return [{ id: "ws-1", name: readFirmName() ?? "My Workspace" }];
+}
+
+function defaultProjects(): Project[] {
+  return TEAM_PROJECTS.map((project) => ({ ...project }));
+}
 
 function hydratePersistedData(
   data: PersistedDataPayload,
@@ -427,8 +443,20 @@ function hydratePersistedData(
     data.deliveryOutputs.every(hasDeliveryOutputShape)
       ? data.deliveryOutputs
       : [];
-  const projects = data.projects ?? mockProjects;
+  // Schema < 7 carried mock CRM data — wipe it. From schema 7+ we PRESERVE the
+  // user's real projects and chat history, and just make sure the predefined
+  // team-project template exists alongside them (non-destructive).
+  const resetMock = (data.artifactSchemaVersion ?? 0) < 7;
+  const projects = resetMock
+    ? defaultProjects()
+    : (() => {
+        const stored = data.projects ?? [];
+        const ids = new Set(stored.map((project) => project.id));
+        const merged = [...stored, ...TEAM_PROJECTS.filter((team) => !ids.has(team.id))];
+        return merged.length > 0 ? merged : defaultProjects();
+      })();
   const shouldDropSeededChatHistory = (data.artifactSchemaVersion ?? 0) < 6;
+  const validProjectIds = new Set(projects.map((project) => project.id));
   const storedBrainRuns =
     Array.isArray(data.agentBrainRuns) && data.agentBrainRuns.every(hasBrainRunShape)
       ? data.agentBrainRuns
@@ -457,13 +485,15 @@ function hydratePersistedData(
     artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
     initialized: true,
     storageBackend,
-    workspaces: data.workspaces ?? mockWorkspaces,
+    workspaces: resetMock ? defaultWorkspaces() : data.workspaces ?? defaultWorkspaces(),
     projects,
-    tasks: data.tasks ?? mockTasks,
-    contacts: enrichContacts(data.contacts ?? mockContacts),
-    sessions: shouldDropSeededChatHistory ? [] : data.sessions ?? [],
+    tasks: resetMock ? [] : data.tasks ?? [],
+    contacts: enrichContacts(resetMock ? [] : data.contacts ?? []),
+    sessions: (shouldDropSeededChatHistory ? [] : data.sessions ?? []).filter((session) =>
+      validProjectIds.has(session.projectId),
+    ),
     messages: shouldDropSeededChatHistory ? [] : data.messages ?? [],
-    teamMembers: (data.teamMembers ?? mockTeamMembers).map(enrichTeamMember),
+    teamMembers: (resetMock ? [] : data.teamMembers ?? []).map(enrichTeamMember),
     datasets:
       Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
         ? data.datasets
@@ -501,8 +531,9 @@ function hydratePersistedData(
       (output) => !output.runId || !droppedChatRunIds.has(output.runId),
     ),
     actionProposals: data.actionProposals ?? [],
-    taskActivities: data.taskActivities ?? seedTaskActivityItems,
-    roadmapItems: data.roadmapItems ?? seedRoadmapItems,
+    taskActivities: resetMock ? [] : data.taskActivities ?? seedTaskActivityItems,
+    roadmapItems: resetMock ? [] : data.roadmapItems ?? seedRoadmapItems,
+    notifications: resetMock ? [] : data.notifications ?? [],
     selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
       ? data.selectedWorkRunId!
       : storedRuns[0]?.id ?? null,
@@ -513,13 +544,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
   initialized: false,
   storageBackend: "memory",
-  workspaces: mockWorkspaces,
-  projects: mockProjects,
-  tasks: mockTasks,
-  contacts: mockContacts,
+  workspaces: defaultWorkspaces(),
+  projects: defaultProjects(),
+  tasks: [],
+  contacts: [],
   sessions: [],
   messages: [],
-  teamMembers: mockTeamMembers,
+  teamMembers: [],
   datasets: [],
   agentRuns: [],
   agentMemoryNotes: [],
@@ -530,7 +561,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   agentApprovals: [],
   agentContextPacks: [],
   agentMemories: [],
-  permissionGrants: ensurePermissionGrants(mockProjects, []),
+  permissionGrants: ensurePermissionGrants(defaultProjects(), []),
   gatewayMessages: [],
   workRuns: [],
   pendingArtifactPlans: [],
@@ -538,6 +569,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   actionProposals: [],
   taskActivities: seedTaskActivityItems,
   roadmapItems: seedRoadmapItems,
+  notifications: [],
   selectedWorkRunId: null,
 
   initialize: async () => {
@@ -785,6 +817,50 @@ export const useDataStore = create<DataState>((set, get) => ({
     });
     persistLocal(get());
     return project;
+  },
+
+  // Name the primary workspace after the firm (from onboarding). Team projects
+  // keep their template names (Risk Team, Marketing Team, …).
+  applyFirmName: (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((state) => ({
+      workspaces: state.workspaces.map((workspace, index) =>
+        index === 0 ? { ...workspace, name: trimmed } : workspace,
+      ),
+    }));
+    persistLocal(get());
+  },
+
+  addNotification: (notification) => {
+    set((state) => ({
+      notifications: [
+        {
+          ...notification,
+          id: generateId("notif"),
+          read: false,
+          createdAt: new Date().toISOString(),
+        },
+        ...state.notifications,
+      ].slice(0, 100),
+    }));
+    persistLocal(get());
+  },
+
+  markNotificationRead: (id) => {
+    set((state) => ({
+      notifications: state.notifications.map((notification) =>
+        notification.id === id ? { ...notification, read: true } : notification,
+      ),
+    }));
+    persistLocal(get());
+  },
+
+  markAllNotificationsRead: () => {
+    set((state) => ({
+      notifications: state.notifications.map((notification) => ({ ...notification, read: true })),
+    }));
+    persistLocal(get());
   },
 
   archiveProject: (projectId) => {
@@ -1660,6 +1736,7 @@ function persistLocal(state: DataState) {
     actionProposals: state.actionProposals,
     taskActivities: state.taskActivities,
     roadmapItems: state.roadmapItems,
+    notifications: state.notifications,
     selectedWorkRunId: state.selectedWorkRunId,
   };
 

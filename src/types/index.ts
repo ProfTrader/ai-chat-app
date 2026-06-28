@@ -30,6 +30,25 @@ export interface Task {
   updatedAt: string;
 }
 
+export type NotificationType =
+  | "task_assigned"
+  | "flow_submitted"
+  | "brief_created"
+  | "email_drafted"
+  | "info";
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body?: string;
+  projectId?: string;
+  taskId?: string;
+  actor?: string;
+  read: boolean;
+  createdAt: string;
+}
+
 export type PresenceStatus = "online" | "away" | "busy" | "offline";
 
 export interface Contact {

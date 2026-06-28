@@ -83,7 +83,7 @@
 }
 
 :root {
-  --radius: 0.45rem;
+  --radius: 0.625rem;
 
   /* ---- Brand scale (review blue) ---- */
   --brand-50: oklch(0.966 0.025 251);
@@ -196,58 +196,90 @@
   --sidebar-ring: var(--ring);
 }
 
+/*
+ * Dark theme — "Studio" (ElevenLabs-inspired)
+ * --------------------------------------------
+ *  - Surfaces are a true neutral near-black ramp (chroma 0) so nothing
+ *    competes with content; depth comes from lightness steps, not hue.
+ *  - The signature move: PRIMARY is near-white on dark — high-contrast
+ *    monochrome actions (white buttons, white workspace mark).
+ *  - Borders / hovers / selection are translucent white, never colored,
+ *    so the chrome reads as one quiet material.
+ *  - Color is rationed: a cool slate accent for focus/links and the warm
+ *    "fin" tone reserved strictly for AI affordances.
+ */
 .dark {
-  /* Brand stays vivid; lifted for contrast on dark surfaces */
-  --brand: oklch(0.680 0.170 264);
-  --brand-foreground: oklch(0.985 0.004 264);
-  --brand-soft: oklch(0.300 0.080 264);
-  --info: oklch(0.680 0.170 264);
+  /* White acts as the brand on dark — the ElevenLabs high-contrast mark */
+  --brand: oklch(0.985 0 0);
+  --brand-foreground: oklch(0.180 0 0);
+  --brand-soft: oklch(1 0 0 / 10%);
+  --info: oklch(0.760 0.045 250);
 
-  /* Dark neutrals tinted toward brand hue 264 */
-  --background: oklch(0.165 0.012 264);
-  --foreground: oklch(0.930 0.008 264);
-  --sidebar: oklch(0.140 0.012 264);
-  --panel: oklch(0.185 0.012 264);
-  --composer: oklch(0.205 0.012 264);
-  --chat-surface: oklch(0.150 0.012 264);
-  --card: oklch(0.185 0.012 264);
-  --card-foreground: oklch(0.930 0.008 264);
-  --popover: oklch(0.205 0.012 264);
-  --popover-foreground: oklch(0.930 0.008 264);
-  --primary: oklch(0.930 0.008 264);
-  --primary-foreground: oklch(0.205 0.015 264);
-  --secondary: oklch(0.235 0.013 264);
-  --secondary-foreground: oklch(0.930 0.008 264);
-  --muted: oklch(0.235 0.013 264);
-  --muted-foreground: oklch(0.660 0.016 264);
-  --accent: oklch(0.300 0.060 264);
-  --accent-foreground: oklch(0.930 0.008 264);
-  --destructive: oklch(0.640 0.190 25);
-  --success: oklch(0.680 0.150 150);
-  --warning: oklch(0.760 0.150 75);
-  --border: oklch(0.300 0.012 264 / 45%);
-  --input: oklch(0.300 0.012 264 / 55%);
-  --ring: oklch(0.680 0.170 264 / 50%);
-  --fin: oklch(0.700 0.200 42);
-  --active: oklch(0.680 0.170 264);
-  --active-soft: oklch(0.300 0.070 264);
-  --shadow-pane: 0 1px 2px oklch(0 0 0 / 35%);
-  --message-incoming-bg: oklch(0.185 0.012 264);
-  --message-incoming-border: oklch(0.300 0.012 264 / 45%);
-  --banner: oklch(0.300 0.070 264);
-  --banner-foreground: oklch(0.880 0.060 264);
-  --chart-1: oklch(0.680 0.170 264);
-  --chart-2: oklch(0.680 0.150 150);
-  --chart-3: oklch(0.700 0.200 42);
-  --chart-4: oklch(0.640 0.170 300);
-  --chart-5: oklch(0.700 0.120 210);
-  --sidebar-foreground: oklch(0.930 0.008 264);
-  --sidebar-primary: oklch(0.680 0.170 264);
-  --sidebar-primary-foreground: oklch(0.985 0.004 264);
-  --sidebar-accent: oklch(0.300 0.060 264);
-  --sidebar-accent-foreground: oklch(0.930 0.008 264);
-  --sidebar-border: oklch(0.930 0.008 264 / 12%);
-  --sidebar-ring: oklch(0.680 0.170 264 / 50%);
+  /* Base surface + ink tokens (components consume bg-shell / bg-pane,
+     so these foundational vars MUST be overridden, not just the aliases) */
+  --shell: oklch(0.150 0 0);
+  --pane: oklch(0.175 0 0);
+  --sidebar-pane: oklch(0.130 0 0);
+  --sidebar-muted: oklch(0.225 0 0);
+  --ink: oklch(0.965 0 0);
+  --ink-muted: oklch(0.660 0 0);
+  --ink-tertiary: oklch(0.505 0 0);
+  --border-strong: oklch(1 0 0 / 14%);
+
+  /* Neutral near-black surface ramp (depth via lightness only) */
+  --background: oklch(0.150 0 0);
+  --foreground: oklch(0.965 0 0);
+  --sidebar: oklch(0.115 0 0);
+  --panel: oklch(0.175 0 0);
+  --composer: oklch(0.205 0 0);
+  --chat-surface: oklch(0.135 0 0);
+  --card: oklch(0.185 0 0);
+  --card-foreground: oklch(0.965 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.965 0 0);
+
+  /* High-contrast monochrome actions */
+  --primary: oklch(0.975 0 0);
+  --primary-foreground: oklch(0.165 0 0);
+  --secondary: oklch(0.235 0 0);
+  --secondary-foreground: oklch(0.965 0 0);
+  --muted: oklch(0.225 0 0);
+  --muted-foreground: oklch(0.660 0 0);
+  --accent: oklch(0.260 0 0);
+  --accent-foreground: oklch(0.975 0 0);
+  --destructive: oklch(0.640 0.195 25);
+  --success: oklch(0.700 0.140 155);
+  --warning: oklch(0.780 0.130 80);
+
+  /* Chrome reads as one quiet material — translucent white lines */
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.820 0 0 / 32%);
+
+  /* AI affordance accent (rationed warm tone) */
+  --fin: oklch(0.720 0.170 50);
+
+  /* Selection / active = faint white wash, not a color */
+  --active: oklch(0.975 0 0);
+  --active-soft: oklch(1 0 0 / 7%);
+
+  --shadow-pane: 0 1px 2px oklch(0 0 0 / 45%);
+  --message-incoming-bg: oklch(0.195 0 0);
+  --message-incoming-border: oklch(1 0 0 / 8%);
+  --banner: oklch(0.235 0 0);
+  --banner-foreground: oklch(0.920 0 0);
+  --chart-1: oklch(0.760 0.045 250);
+  --chart-2: oklch(0.700 0.140 155);
+  --chart-3: oklch(0.720 0.170 50);
+  --chart-4: oklch(0.700 0.090 300);
+  --chart-5: oklch(0.720 0.060 210);
+  --sidebar-foreground: oklch(0.965 0 0);
+  --sidebar-primary: oklch(0.975 0 0);
+  --sidebar-primary-foreground: oklch(0.165 0 0);
+  --sidebar-accent: oklch(0.260 0 0);
+  --sidebar-accent-foreground: oklch(0.965 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.820 0 0 / 32%);
 }
 
 @layer base {

@@ -7,6 +7,7 @@ import {
   validateMoonshotApiKey,
 } from "../lib/auth.js";
 import { chatContextSchema, extractLatestUserMessage } from "../lib/context.js";
+import { firmProfileToPromptBlock, loadFirmProfile } from "../lib/firm-profile.js";
 import { createCursorChatStream } from "../lib/cursor.js";
 import { createMoonshotChatStream } from "../lib/moonshot.js";
 import {
@@ -62,6 +63,10 @@ chat.post("/", async (c) => {
     return c.json({ code: "INVALID_REQUEST", message: "Missing user message." }, 400);
   }
 
+  // Load the saved firm profile server-side so the agent always carries the
+  // firm's "soul", independent of what the client sends.
+  const firmRecord = await loadFirmProfile();
+
   const context = chatContextSchema.parse({
     sessionId: body.sessionId,
     projectId: body.projectId,
@@ -76,6 +81,9 @@ chat.post("/", async (c) => {
     datasetsSummary: body.datasetsSummary,
     memoriesSummary: body.memoriesSummary,
     recentMessages: body.recentMessages,
+    businessProfile: body.businessProfile,
+    firmMemory: firmRecord ? firmProfileToPromptBlock(firmRecord) : undefined,
+    firmName: firmRecord?.answers.businessName,
   });
 
   const model = useOllama

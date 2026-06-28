@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/workspace/empty-state";
 import { TaskList } from "@/components/workspace/task-list";
 import { KanbanBoard } from "@/components/workspace/kanban-board";
 import { NodeManager } from "@/components/workspace/node-manager";
+import { InboxWorkspace } from "@/components/workspace/inbox-workspace";
 import { BriefsWorkspace } from "@/components/workspace/briefs-workspace";
 import { TimelineWorkspace } from "@/components/workspace/timeline-workspace";
 import { ChatComposer } from "@/components/composer/chat-composer";
@@ -141,12 +142,15 @@ export function MainWorkspace() {
       </div>
 
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {activeView === "chat" && (
-          <ChatSessionProvider sessionId={sessionId}>
-            {sessionId ? <ChatThread /> : <EmptyState />}
-            <ChatComposer />
-          </ChatSessionProvider>
-        )}
+        {activeView === "chat" &&
+          (sidebarMode === "inbox" ? (
+            <InboxWorkspace />
+          ) : (
+            <ChatSessionProvider sessionId={sessionId}>
+              {sessionId ? <ChatThread /> : <EmptyState />}
+              <ChatComposer />
+            </ChatSessionProvider>
+          ))}
         {activeView === "briefs" && <BriefsWorkspace />}
         {activeView === "tasks" && <TaskList />}
         {activeView === "board" && <KanbanBoard />}

@@ -52,6 +52,8 @@ import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useShellStore } from "@/stores/shell-store";
+import { useOnboardingStore } from "@/stores/onboarding-store";
+import { firmProfileHtmlUrl } from "@/lib/onboarding/client";
 import { toast } from "sonner";
 import type { Project, Session, ViewType } from "@/types";
 
@@ -163,16 +165,28 @@ function AiWorkingDot({ active }: { active: boolean }) {
 }
 
 function WorkspaceButton() {
+  const workspaces = useDataStore((s) => s.workspaces);
+  const workspaceId = useSelectionStore((s) => s.workspaceId);
+  const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0];
+  const name = workspace?.name ?? "My Workspace";
+  const initials =
+    name
+      .split(/\s+/)
+      .map((word) => word[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "NX";
+
   return (
     <Button
       variant="ghost"
       className="h-11 w-full justify-start gap-2 rounded-none border-b border-border px-3"
     >
       <span className="grid size-7 place-items-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-        NX
+        {initials}
       </span>
       <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-sm font-semibold">Nexus</span>
+        <span className="block truncate text-sm font-semibold">{name}</span>
         <span className="block truncate text-xs text-muted-foreground">
           Operator workspace
         </span>
@@ -224,6 +238,8 @@ function TrialCallout() {
 
 function AccountMenu() {
   const { setProfileOpen, setSettingsOpen } = useShellStore();
+  const restartOnboarding = useOnboardingStore((s) => s.restart);
+  const hasFirmProfile = useOnboardingStore((s) => Boolean(s.profile));
 
   return (
     <div className="border-t border-border p-2">
@@ -264,6 +280,22 @@ function AccountMenu() {
               <Settings data-icon="inline-start" />
               Settings
             </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Firm memory</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => restartOnboarding()}>
+              <Sparkles data-icon="inline-start" />
+              {hasFirmProfile ? "Update business profile" : "Set up business profile"}
+            </DropdownMenuItem>
+            {hasFirmProfile ? (
+              <DropdownMenuItem
+                onClick={() => window.open(firmProfileHtmlUrl, "_blank", "noopener,noreferrer")}
+              >
+                <FileText data-icon="inline-start" />
+                Open firm profile
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
@@ -518,6 +550,7 @@ function ProjectTreeItem({
   const { setActiveView, setSidebarMode } = useShellStore();
   const addSession = useDataStore((s) => s.addSession);
   const archiveSession = useDataStore((s) => s.archiveSession);
+  const archiveProject = useDataStore((s) => s.archiveProject);
 
   const firstSession = sessions[0];
   const pinnedSessions = sessions.filter((session) => session.pinned);
@@ -576,25 +609,47 @@ function ProjectTreeItem({
 
   return (
     <div className="py-1">
-      <Button
-        variant="ghost"
-        className={cn(
-          "h-8 w-full justify-start gap-2 rounded-md px-2 font-normal",
-          isActive ? "bg-muted/70 text-foreground" : "text-muted-foreground hover:bg-muted/70",
-        )}
-        onClick={openProject}
-      >
-        {isActive ? (
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <FolderOpen className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-          {project.name}
-        </span>
-        <NotificationBadge count={unreadCount} />
-      </Button>
+      <div className="group/proj relative flex items-center">
+        <Button
+          variant="ghost"
+          className={cn(
+            "h-8 w-full justify-start gap-2 rounded-md px-2 pr-7 font-normal",
+            isActive ? "bg-muted/70 text-foreground" : "text-muted-foreground hover:bg-muted/70",
+          )}
+          onClick={openProject}
+        >
+          {isActive ? (
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          )}
+          <FolderOpen className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
+            {project.name}
+          </span>
+          <NotificationBadge count={unreadCount} />
+        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-1 text-muted-foreground opacity-0 transition-opacity group-hover/proj:opacity-100 focus-visible:opacity-100"
+                aria-label={`Archive ${project.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  archiveProject(project.id);
+                  toast.success(`${project.name} archived`);
+                }}
+              />
+            }
+          >
+            <Archive />
+          </TooltipTrigger>
+          <TooltipContent>Archive project</TooltipContent>
+        </Tooltip>
+      </div>
 
       {isActive ? (
         <div className="ml-4 mt-1 space-y-0.5 border-l border-border/70 pl-2">
@@ -982,6 +1037,9 @@ export function NavSidebar() {
   const projects = useDataStore((s) => s.projects);
   const tasks = useDataStore((s) => s.tasks);
   const workRuns = useDataStore((s) => s.workRuns);
+  const unreadNotifications = useDataStore(
+    (s) => s.notifications.filter((notification) => !notification.read).length,
+  );
   const storedAgentWorking = useDataStore((s) =>
     s.agentBrainRuns.some((run) => run.status === "running" || run.status === "queued"),
   );
@@ -1200,7 +1258,7 @@ export function NavSidebar() {
             <ModuleButton
               icon={Inbox}
               label="Inbox"
-              count={inboxCount}
+              count={unreadNotifications || inboxCount}
               isActive={sidebarMode === "inbox"}
               onClick={() => {
                 setSidebarMode("inbox");

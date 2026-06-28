@@ -6,6 +6,10 @@ import { auth } from "./routes/auth.js";
 import { agent } from "./routes/agent.js";
 import { chat } from "./routes/chat.js";
 import { gateway } from "./routes/gateway.js";
+import { onboarding } from "./routes/onboarding.js";
+import { email } from "./routes/email.js";
+import { tasks } from "./routes/tasks.js";
+import { clarify } from "./routes/clarify.js";
 
 config();
 config({ path: "server/.env", override: false });
@@ -26,6 +30,10 @@ app.route("/api/auth", auth);
 app.route("/api/agent", agent);
 app.route("/api/chat", chat);
 app.route("/api/gateway", gateway);
+app.route("/api/onboarding", onboarding);
+app.route("/api/email", email);
+app.route("/api/tasks", tasks);
+app.route("/api/clarify", clarify);
 
 const port = Number(process.env.PORT ?? 3001);
 

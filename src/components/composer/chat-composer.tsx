@@ -1,11 +1,23 @@
-import { useCallback, useRef, useState } from "react";
-import { ArrowUp, CheckCircle2, FileText, PencilLine, Square, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { ArrowUp, CheckCircle2, FileText, ImageIcon, ListTodo, Mail, Paperclip, PencilLine, Square, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 import { ContextChipBadge } from "@/components/composer/context-chip";
 import { useChatSession } from "@/lib/chat/chat-session-provider";
+import { fileToAttachment, composeMessageWithAttachments, formatBytes } from "@/lib/chat/attachments";
 import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -19,10 +31,17 @@ const modes: ComposerMode[] = ["plan", "auto"];
 export function ChatComposer() {
   const { composerText, composerMode, setComposerText, setComposerMode, resetComposer } =
     useChatStore();
-  const { contextChips, removeContextChip, sessionId, projectId } = useSelectionStore();
+  const attachments = useChatStore((s) => s.attachments);
+  const addAttachment = useChatStore((s) => s.addAttachment);
+  const removeAttachment = useChatStore((s) => s.removeAttachment);
+  const { contextChips, removeContextChip, sessionId, projectId, setSessionId } =
+    useSelectionStore();
   const { projects } = useDataStore();
+  const addSession = useDataStore((s) => s.addSession);
   const {
     send,
+    composeEmail,
+    proposeTasks,
     stop,
     status,
     pendingBriefPlan,
@@ -37,11 +56,30 @@ export function ChatComposer() {
   const project = projects.find((p) => p.id === projectId);
   const isBusy = status === "submitted" || status === "streaming" || artifactBusy;
   const [choiceBusy, setChoiceBusy] = useState<"create" | "dismiss" | null>(null);
+  const [pending, setPending] = useState<{ kind: "send" | "email" | "tasks"; text: string } | null>(
+    null,
+  );
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepth = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const ingestFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      for (const file of list) {
+        const attachment = await fileToAttachment(file);
+        addAttachment(attachment);
+      }
+    },
+    [addAttachment],
+  );
 
   const handleSend = useCallback(async () => {
     const text = composerText.trim();
-    if (!text || !sessionId) return;
+    const current = useChatStore.getState().attachments;
+    if (!text && current.length === 0) return;
 
     if (!connected) {
       await refreshStatus();
@@ -53,24 +91,173 @@ export function ChatComposer() {
     }
 
     setActiveView("chat");
+
+    const outgoing = composeMessageWithAttachments(text, current);
+
+    // No active session yet (e.g. the empty state): create one in the current
+    // project, then send once the new session is live (handled by the effect).
+    if (!sessionId) {
+      if (!projectId) {
+        toast.error("Select a project to start chatting.");
+        return;
+      }
+      resetComposer();
+      const session = await addSession(projectId);
+      setSessionId(session.id);
+      setPending({ kind: "send", text: outgoing });
+      return;
+    }
+
     resetComposer();
-    await send(text);
+    await send(outgoing);
   }, [
+    addSession,
     composerText,
     connected,
+    projectId,
     refreshStatus,
     resetComposer,
     send,
     sessionId,
     setActiveView,
+    setSessionId,
     setSettingsOpen,
   ]);
+
+  const handleEmail = useCallback(async () => {
+    const text = composerText.trim();
+    if (!text) {
+      toast.message("Type what the email should say first.");
+      return;
+    }
+    if (!connected) await refreshStatus();
+    if (!useAuthStore.getState().status?.connected) {
+      setSettingsOpen(true);
+      return;
+    }
+    setActiveView("chat");
+
+    if (!sessionId) {
+      if (!projectId) {
+        toast.error("Select a project to start chatting.");
+        return;
+      }
+      resetComposer();
+      const session = await addSession(projectId);
+      setSessionId(session.id);
+      setPending({ kind: "email", text });
+      return;
+    }
+
+    resetComposer();
+    await composeEmail(text);
+  }, [
+    addSession,
+    composeEmail,
+    composerText,
+    connected,
+    projectId,
+    refreshStatus,
+    resetComposer,
+    sessionId,
+    setActiveView,
+    setSessionId,
+    setSettingsOpen,
+  ]);
+
+  const handleTasks = useCallback(async () => {
+    const text = composerText.trim();
+    if (!text) {
+      toast.message("Describe the work and I'll break it into tasks.");
+      return;
+    }
+    if (!connected) await refreshStatus();
+    if (!useAuthStore.getState().status?.connected) {
+      setSettingsOpen(true);
+      return;
+    }
+    setActiveView("chat");
+
+    if (!sessionId) {
+      if (!projectId) {
+        toast.error("Select a project to start chatting.");
+        return;
+      }
+      resetComposer();
+      const session = await addSession(projectId);
+      setSessionId(session.id);
+      setPending({ kind: "tasks", text });
+      return;
+    }
+
+    resetComposer();
+    await proposeTasks(text);
+  }, [
+    addSession,
+    composerText,
+    connected,
+    projectId,
+    proposeTasks,
+    refreshStatus,
+    resetComposer,
+    sessionId,
+    setActiveView,
+    setSessionId,
+    setSettingsOpen,
+  ]);
+
+  // Flush a queued action once the freshly created session becomes active.
+  // Defer so the session provider settles the new (empty) session before we
+  // persist + send — otherwise the provider reloads the just-persisted message
+  // and chat.sendMessage appends it again, rendering the first message twice.
+  useEffect(() => {
+    if (!pending || !sessionId) return;
+    const queued = pending;
+    setPending(null);
+    window.setTimeout(() => {
+      if (queued.kind === "email") void composeEmail(queued.text);
+      else if (queued.kind === "tasks") void proposeTasks(queued.text);
+      else void send(queued.text);
+    }, 0);
+  }, [pending, sessionId, send, composeEmail, proposeTasks]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void handleSend();
     }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length > 0) {
+      e.preventDefault();
+      void ingestFiles(files);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragging(true);
+  };
+  const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+  };
+  const handleDragLeave = () => {
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setIsDragging(false);
+    }
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragging(false);
+    void ingestFiles(e.dataTransfer.files);
   };
 
   const handleCreatePlan = async () => {
@@ -191,9 +378,24 @@ export function ChatComposer() {
           </div>
         ) : null}
 
-        <div className="rounded-xl border border-border bg-composer">
+        <div
+          className="group relative rounded-[1.4rem] border border-border bg-composer shadow-[0_18px_50px_-28px_oklch(0_0_0/0.85)] transition-all duration-200 focus-within:border-foreground/20 focus-within:shadow-[0_22px_60px_-26px_oklch(0_0_0/0.95)]"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDragging && (
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-[1.4rem] border-2 border-dashed border-primary/50 bg-background/85 backdrop-blur-sm">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground motion-safe:animate-pulse">
+                <Upload className="size-4" />
+                Drop files to attach
+              </div>
+            </div>
+          )}
+
           {!connected && (
-            <div className="border-b border-border px-3.5 py-2 text-xs text-muted-foreground">
+            <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
               Add a Moonshot/Kimi key or configure Ollama on the server to start chatting.{" "}
               <button
                 type="button"
@@ -205,25 +407,103 @@ export function ChatComposer() {
             </div>
           )}
 
+          {attachments.length > 0 && (
+            <AttachmentGroup className="px-3 pt-3">
+              {attachments.map((attachment) => (
+                <Attachment key={attachment.id} size="sm">
+                  <AttachmentMedia variant={attachment.kind === "image" ? "image" : "icon"}>
+                    {attachment.kind === "image" && attachment.previewUrl ? (
+                      <img src={attachment.previewUrl} alt={attachment.name} />
+                    ) : attachment.kind === "image" ? (
+                      <ImageIcon />
+                    ) : (
+                      <FileText />
+                    )}
+                  </AttachmentMedia>
+                  <AttachmentContent>
+                    <AttachmentTitle>{attachment.name}</AttachmentTitle>
+                    <AttachmentDescription>
+                      {attachment.kind === "text" ? "Text · " : attachment.kind === "image" ? "Image · " : ""}
+                      {formatBytes(attachment.size)}
+                    </AttachmentDescription>
+                  </AttachmentContent>
+                  <AttachmentActions>
+                    <AttachmentAction
+                      aria-label={`Remove ${attachment.name}`}
+                      onClick={() => removeAttachment(attachment.id)}
+                    >
+                      <X />
+                    </AttachmentAction>
+                  </AttachmentActions>
+                </Attachment>
+              ))}
+            </AttachmentGroup>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void ingestFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+
           <Textarea
             ref={textareaRef}
             value={composerText}
             onChange={(e) => setComposerText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               connected ? "What should we tackle?" : "Configure a chat provider to enable chat"
             }
             rows={1}
             disabled={isBusy}
             className={cn(
-              "field-sizing-content max-h-32 min-h-0 resize-none rounded-none border-0 bg-transparent px-3.5 pt-3 pb-1 text-sm shadow-none",
+              "field-sizing-content max-h-40 min-h-0 resize-none rounded-none border-0 bg-transparent px-4 pt-3.5 pb-1.5 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/70",
               "focus-visible:border-0 focus-visible:ring-0",
               "disabled:bg-transparent dark:bg-transparent",
             )}
           />
 
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <div className="flex min-w-0 items-center gap-1">
+          <div className="flex items-center justify-between gap-2 px-3 pb-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="rounded-full text-muted-foreground"
+                aria-label="Attach files"
+                title="Attach files"
+                disabled={isBusy}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="rounded-full text-muted-foreground"
+                aria-label="Draft email"
+                title="Draft an email from this"
+                disabled={isBusy}
+                onClick={() => void handleEmail()}
+              >
+                <Mail />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="rounded-full text-muted-foreground"
+                aria-label="Propose tasks"
+                title="Break this into tasks for the board"
+                disabled={isBusy}
+                onClick={() => void handleTasks()}
+              >
+                <ListTodo />
+              </Button>
               <ToggleGroup
                 variant="outline"
                 size="sm"
@@ -233,19 +513,19 @@ export function ChatComposer() {
                   const next = value[0] as ComposerMode | undefined;
                   if (next) setComposerMode(next);
                 }}
-                className="rounded-md"
+                className="rounded-full"
               >
                 {modes.map((mode) => (
                   <ToggleGroupItem
                     key={mode}
                     value={mode}
-                    className="h-7 min-w-0 px-2.5 text-xs capitalize"
+                    className="h-7 min-w-0 rounded-full px-3 text-xs capitalize"
                   >
                     {mode}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
-              <span className="hidden truncate pl-1 text-xs text-muted-foreground sm:inline">
+              <span className="hidden truncate text-xs text-muted-foreground sm:inline">
                 Nexus ·{" "}
                 <span className={composerMode === "auto" ? "text-fin" : undefined}>
                   {isBusy ? "Running" : composerMode === "plan" ? "Plan" : "Auto"}
@@ -255,14 +535,22 @@ export function ChatComposer() {
 
             <div className="flex shrink-0 items-center gap-0.5">
               {isBusy ? (
-                <Button variant="outline" size="icon-xs" onClick={stop}>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={stop}
+                  className="rounded-full"
+                  aria-label="Stop generating"
+                >
                   <Square data-icon="inline-start" />
                 </Button>
               ) : (
                 <Button
-                  size="icon-xs"
+                  size="icon"
                   onClick={() => void handleSend()}
-                  disabled={!composerText.trim() || isBusy}
+                  disabled={(!composerText.trim() && attachments.length === 0) || isBusy}
+                  className="rounded-full transition-transform hover:scale-105 active:scale-95"
+                  aria-label="Send message"
                 >
                   <ArrowUp data-icon="inline-start" />
                 </Button>

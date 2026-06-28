@@ -83,7 +83,13 @@ export async function createMoonshotChatStream(options: {
 }) {
   const { createUIMessageStream, generateId } = await import("ai");
   const systemPrompt = buildSystemPrompt(options.context);
-  const temperature = options.model.startsWith("kimi-k2.7") ? 1 : 0.2;
+  // The kimi-k2 series (k2.5 / k2.6 / k2.7*) only accepts temperature 1.
+  const isReasoningModel = options.model.startsWith("kimi-k2");
+  const temperature = isReasoningModel ? 1 : 0.2;
+  // kimi-k2 reasons before answering, and reasoning tokens count against this
+  // budget. A small cap (e.g. 1200) gets fully consumed by reasoning, leaving
+  // the answer truncated or empty. Give reasoning models plenty of headroom.
+  const maxCompletionTokens = isReasoningModel ? 8192 : 1200;
 
   return createUIMessageStream({
     execute: async ({ writer }) => {
@@ -135,7 +141,7 @@ export async function createMoonshotChatStream(options: {
           model: options.model,
           stream: true,
           temperature,
-          max_completion_tokens: 1200,
+          max_completion_tokens: maxCompletionTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: options.userMessage },
@@ -209,8 +215,9 @@ export async function createMoonshotChatCompletion(options: {
     body: JSON.stringify({
       model: options.model,
       stream: false,
-      temperature: options.temperature ?? (options.model.startsWith("kimi-k2.7") ? 1 : 0.2),
-      max_completion_tokens: options.maxTokens ?? 2200,
+      temperature: options.temperature ?? (options.model.startsWith("kimi-k2") ? 1 : 0.2),
+      max_completion_tokens:
+        options.maxTokens ?? (options.model.startsWith("kimi-k2") ? 8192 : 2200),
       messages: [
         { role: "system", content: options.system },
         { role: "user", content: options.user },

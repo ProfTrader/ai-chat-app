@@ -126,8 +126,19 @@ export async function resolveMoonshotApiKey(c: Context): Promise<string | null> 
   return process.env.MOONSHOT_API_KEY ?? process.env.KIMI_API_KEY ?? null;
 }
 
+function isMoonshotModel(model?: string | null): model is string {
+  return Boolean(model && (model.startsWith("kimi") || model.startsWith("moonshot")));
+}
+
 export function resolveMoonshotModel(model?: string | null): string {
-  const requested = model ?? process.env.MOONSHOT_MODEL ?? process.env.KIMI_MODEL ?? DEFAULT_MOONSHOT_MODEL;
+  // Only honor a requested model if it actually looks like a Moonshot/Kimi
+  // model. This guards against stale clients sending a previously-configured
+  // Ollama model name (e.g. "hermes-gemma4:e4b"), which Moonshot would reject.
+  const requested =
+    (isMoonshotModel(model) ? model : null) ??
+    process.env.MOONSHOT_MODEL ??
+    process.env.KIMI_MODEL ??
+    DEFAULT_MOONSHOT_MODEL;
   return MOONSHOT_MODEL_ALIASES[requested] ?? requested;
 }
 

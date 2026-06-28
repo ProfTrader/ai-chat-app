@@ -78,6 +78,19 @@ export const chatContextSchema = z.object({
       }),
     )
     .default([]),
+  businessProfile: z
+    .object({
+      businessName: z.string().optional(),
+      summary: z.string().optional(),
+      industry: z.string().optional(),
+      businessModel: z.string().optional(),
+      valueProposition: z.string().optional(),
+      targetCustomers: z.array(z.string()).default([]),
+    })
+    .optional(),
+  // Authoritative firm "soul" loaded server-side from the saved firm profile.
+  firmMemory: z.string().optional(),
+  firmName: z.string().optional(),
 });
 
 export type ChatContext = z.infer<typeof chatContextSchema>;
@@ -176,17 +189,41 @@ export function buildSystemPrompt(context: ChatContext): string {
           .join("\n")
       : "No recent messages provided.";
 
+  const business = context.businessProfile;
+  const businessSection = context.firmMemory?.trim()
+    ? context.firmMemory.trim()
+    : business
+      ? [
+          `Business: ${business.businessName ?? context.workspaceName ?? "the user's company"}`,
+          business.industry ? `Industry: ${business.industry}` : "",
+          business.businessModel ? `Model: ${business.businessModel}` : "",
+          business.summary ? `Summary: ${truncate(business.summary, 320)}` : "",
+          business.valueProposition ? `Value proposition: ${truncate(business.valueProposition, 200)}` : "",
+          business.targetCustomers.length
+            ? `Target customers: ${business.targetCustomers.join(", ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "No firm profile saved yet. The user has not completed onboarding — if it would help, offer to set up their workspace so you can tailor your help.";
+
+  const firmName =
+    context.firmName ?? business?.businessName ?? context.workspaceName ?? "this firm";
+
   const modeInstructions =
     context.composerMode === "plan"
       ? "Respond with structured plans, numbered steps, and clear rationale. Ask clarifying questions when scope is ambiguous."
       : "Respond concisely with actionable CRM guidance. Prefer bullet points and direct recommendations.";
 
-  return `You are Dexter, the agent inside Nexus CRM. You are embedded in an enterprise customer relationship workspace, but you should feel like a capable teammate in the room rather than a ticket bot.
+  return `You are Dexter, the dedicated AI operator for ${firmName} inside Nexus CRM. You should feel like a sharp teammate in the room who knows this firm cold — not a generic assistant or ticket bot.
 
 Workspace: ${context.workspaceName ?? "Acme Corp"}
 Project: ${context.projectName ?? "Unknown"} (${context.projectSlug ?? "n/a"})
 Session: ${context.sessionId}
 Composer mode: ${context.composerMode}
+
+FIRM MEMORY — the durable profile of ${firmName} you work for (always honor and reference this):
+${businessSection}
 
 Context chips:
 ${chips}
@@ -213,6 +250,10 @@ ${recentMessages}
 
 Behavior:
 - ${modeInstructions}
+- You work for ${firmName}. Ground recommendations in the FIRM MEMORY above — reference their industry, goals, target customers, and competitors by name when it makes your help sharper. Tailor examples and language to their business, not generic advice.
+- When the user asks you to create a plan, strategy, campaign, or to build something and key specifics are missing (audience, goal, timeline, scope, channels, budget), ask one or two concrete clarifying questions grounded in ${firmName}'s business BEFORE laying out the plan. Do not present a predetermined plan or invent datasets, customers, metrics, competitors, tasks, or facts that are not in the firm memory or provided by the user.
+- The workspace starts empty — there is no preloaded CRM data. Only reference tasks, contacts, datasets, or team members that actually appear in the project snapshot above; if a section says none are provided, say so rather than inventing entries.
+- If the firm memory is missing or thin, briefly suggest completing or updating onboarding so you can personalize better.
 - Voice: warm, present, direct, and lightly conversational. Sound like a sharp teammate who knows the workspace, not a generic assistant.
 - When the user greets you, thanks you, checks in, jokes lightly, or says something welcoming, continue the conversation naturally. Acknowledge the tone, keep it brief, and make the room feel warm before offering to help.
 - Do not force a work summary into casual greetings. If there is no explicit task, ask one useful open question or offer a grounded next step tied to the current project.

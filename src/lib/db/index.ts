@@ -1,10 +1,4 @@
 import Database from "@tauri-apps/plugin-sql";
-import {
-  mockContacts,
-  mockProjects,
-  mockTasks,
-  mockWorkspaces,
-} from "@/lib/mock-data";
 import type {
   Contact,
   Message,
@@ -97,59 +91,15 @@ export async function initDatabase() {
 export async function seedDatabase() {
   const database = await getDb();
 
-  for (const ws of mockWorkspaces) {
-    await database.execute(
-      "INSERT OR IGNORE INTO workspaces (id, name) VALUES ($1, $2)",
-      [ws.id, ws.name],
-    );
-  }
-
-  for (const p of mockProjects) {
-    await database.execute(
-      "INSERT OR IGNORE INTO projects (id, workspace_id, name, slug) VALUES ($1, $2, $3, $4)",
-      [p.id, p.workspaceId, p.name, p.slug],
-    );
-  }
-
-  for (const t of mockTasks) {
-    await database.execute(
-      `INSERT OR IGNORE INTO tasks
-       (id, project_id, identifier, title, status, description, assignee, priority, due_date, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        t.id,
-        t.projectId,
-        t.identifier,
-        t.title,
-        t.status,
-        t.description ?? null,
-        t.assignee ?? null,
-        t.priority ?? null,
-        t.dueDate ?? null,
-        t.createdAt,
-        t.updatedAt,
-      ],
-    );
-  }
-
-  for (const c of mockContacts) {
-    await database.execute(
-      `INSERT OR IGNORE INTO contacts
-       (id, project_id, name, company, email, phone, last_activity, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        c.id,
-        c.projectId,
-        c.name,
-        c.company,
-        c.email ?? null,
-        c.phone ?? null,
-        c.lastActivity,
-        c.notes ?? null,
-      ],
-    );
-  }
-
+  // Seed a clean, mock-free starting workspace + project only.
+  await database.execute(
+    "INSERT OR IGNORE INTO workspaces (id, name) VALUES ($1, $2)",
+    ["ws-1", "My Workspace"],
+  );
+  await database.execute(
+    "INSERT OR IGNORE INTO projects (id, workspace_id, name, slug) VALUES ($1, $2, $3, $4)",
+    ["proj-1", "ws-1", "General", "general"],
+  );
 }
 
 export async function insertMessage(message: Message) {

@@ -1,10 +1,25 @@
-import { ArrowUpRight, Check, Copy } from "lucide-react";
+import { ArrowUpRight, Check, Copy, FileText, ImageIcon } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
+import {
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 import { Button } from "@/components/ui/button";
+import { EmailArtifact } from "@/components/workspace/email-artifact";
+import { TaskProposalArtifact } from "@/components/workspace/task-proposal-artifact";
+import { InteractiveQuestions } from "@/components/workspace/interactive-questions";
+import { parseMessageAttachments, formatBytes } from "@/lib/chat/attachments";
+import { parseEmailMarker } from "@/lib/email/client";
+import { parseTasksMarker } from "@/lib/tasks/client";
+import { parseClarifyMarker } from "@/lib/clarify/client";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
   Message,
@@ -153,7 +168,11 @@ export function ChatMessage({
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const text = getMessageText(message);
-  const { runId, cleanText } = parseViewBriefMarker(text);
+  const { attachments, cleanText: textWithoutFiles } = parseMessageAttachments(text);
+  const { cleanText: textWithoutEmail } = parseEmailMarker(textWithoutFiles);
+  const { cleanText: textWithoutTasks } = parseTasksMarker(textWithoutEmail);
+  const { cleanText: textWithoutAsk } = parseClarifyMarker(textWithoutTasks);
+  const { runId, cleanText } = parseViewBriefMarker(textWithoutAsk);
   const selectWorkRun = useDataStore((state) => state.selectWorkRun);
   const setActiveView = useShellStore((state) => state.setActiveView);
 
@@ -186,30 +205,61 @@ export function ChatMessage({
         {showStreamingStatus && isStreaming && !text ? (
           <StreamingStatus label="Dexter is thinking..." />
         ) : isUser ? (
-          <Bubble align="end" variant="default" className="max-w-[min(34rem,82%)]">
-            <BubbleContent className="px-3.5 py-2.5">{cleanText}</BubbleContent>
-          </Bubble>
+          <div className="flex flex-col items-end gap-1.5">
+            {attachments.length > 0 && (
+              <AttachmentGroup className="max-w-[min(34rem,82%)] justify-end">
+                {attachments.map((attachment, index) => (
+                  <Attachment key={`${attachment.name}-${index}`} size="sm">
+                    <AttachmentMedia variant={attachment.kind === "image" ? "image" : "icon"}>
+                      {attachment.kind === "image" ? <ImageIcon /> : <FileText />}
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>{attachment.name}</AttachmentTitle>
+                      <AttachmentDescription>{formatBytes(attachment.size)}</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                ))}
+              </AttachmentGroup>
+            )}
+            {cleanText && (
+              <Bubble align="end" variant="default" className="max-w-[min(34rem,82%)]">
+                <BubbleContent
+                  className="rounded-2xl px-4 py-2.5 text-left shadow-sm"
+                  style={{ overflowWrap: "normal", wordBreak: "normal" }}
+                >
+                  {cleanText}
+                </BubbleContent>
+              </Bubble>
+            )}
+          </div>
         ) : (
           <BubbleGroup>
             {message.parts.map((part, index) => {
               if (part.type !== "text") return null;
 
-              const partText = parseViewBriefMarker(part.text).cleanText;
-              if (!partText) return null;
+              const { email, cleanText: textWithoutEmailPart } = parseEmailMarker(part.text);
+              const { tasks: proposedTasks, cleanText: textWithoutTasksPart } =
+                parseTasksMarker(textWithoutEmailPart);
+              const { payload: clarifyPayload, cleanText: textWithoutAskPart } =
+                parseClarifyMarker(textWithoutTasksPart);
+              const partText = parseViewBriefMarker(textWithoutAskPart).cleanText;
+              if (!partText && !email && !proposedTasks && !clarifyPayload) return null;
 
               return (
-                <Bubble
-                  key={`${part.type}-${index}`}
-                  variant="muted"
-                  className="max-w-[min(38rem,86%)]"
-                >
-                  <BubbleContent className="flex flex-col gap-2.5 px-3.5 py-2.5 text-foreground">
-                    <ProductionStream
-                      content={partText}
-                      isStreaming={isStreaming}
-                    />
-                  </BubbleContent>
-                </Bubble>
+                <div key={`${part.type}-${index}`} className="flex flex-col gap-2">
+                  {partText && (
+                    <Bubble variant="muted" className="max-w-[min(38rem,86%)]">
+                      <BubbleContent className="flex flex-col gap-2.5 rounded-2xl border border-border/70 px-4 py-3 text-foreground shadow-sm">
+                        <ProductionStream content={partText} isStreaming={isStreaming} />
+                      </BubbleContent>
+                    </Bubble>
+                  )}
+                  {email && <EmailArtifact email={email} />}
+                  {proposedTasks && proposedTasks.length > 0 && (
+                    <TaskProposalArtifact tasks={proposedTasks} />
+                  )}
+                  {clarifyPayload && <InteractiveQuestions payload={clarifyPayload} />}
+                </div>
               );
             })}
           </BubbleGroup>
