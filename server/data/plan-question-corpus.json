@@ -1,0 +1,135 @@
+[
+  {
+    "id": "gtm-launch",
+    "domain": "go-to-market",
+    "intents": ["launch", "gtm", "campaign", "strategy", "positioning"],
+    "questionPatterns": [
+      "Which launch motion should this plan optimize for first?",
+      "What audience segment matters most for the first version of this plan?",
+      "What constraint should shape the plan most: timeline, budget, team capacity, or channel focus?"
+    ],
+    "chipExamples": [
+      "Sales-led pipeline",
+      "Product-led activation",
+      "Partner-led distribution",
+      "Authority and trust first"
+    ],
+    "appliesWhen": [
+      "The request involves launching a product, campaign, GTM motion, or market-facing initiative."
+    ]
+  },
+  {
+    "id": "client-onboarding",
+    "domain": "customer-success",
+    "intents": ["onboarding", "client", "customer", "implementation", "handoff"],
+    "questionPatterns": [
+      "What should the onboarding plan protect most: speed, customer confidence, data quality, or adoption?",
+      "Who needs to be treated as the primary owner on the customer side?",
+      "What is the highest-risk step in this onboarding?"
+    ],
+    "chipExamples": [
+      "Fast time to value",
+      "Executive confidence",
+      "Clean data and access",
+      "Long-term adoption"
+    ],
+    "appliesWhen": [
+      "The request is about onboarding, implementation, support handoff, customer success, or training."
+    ]
+  },
+  {
+    "id": "release-quality",
+    "domain": "engineering",
+    "intents": ["bug", "qa", "release", "testing", "regression", "rollback"],
+    "questionPatterns": [
+      "What release risk should the plan reduce first?",
+      "How strict should the release criteria be?",
+      "Which surface area needs the deepest test coverage?"
+    ],
+    "chipExamples": [
+      "Critical regressions",
+      "Customer-facing workflows",
+      "Data integrity",
+      "Rollback readiness"
+    ],
+    "appliesWhen": [
+      "The request involves QA, release readiness, bug bashes, regression testing, or production rollout."
+    ]
+  },
+  {
+    "id": "hiring",
+    "domain": "talent",
+    "intents": ["hiring", "recruit", "candidate", "interview", "scorecard", "offer"],
+    "questionPatterns": [
+      "What should the hiring process optimize for: speed, signal quality, candidate experience, or team alignment?",
+      "Which capability is non-negotiable for this role?",
+      "How much structure do you want in the interview loop?"
+    ],
+    "chipExamples": [
+      "Fast close",
+      "High signal",
+      "Candidate experience",
+      "Team alignment"
+    ],
+    "appliesWhen": [
+      "The request involves recruiting, interview loops, role scorecards, candidate evaluation, or offers."
+    ]
+  },
+  {
+    "id": "investor-update",
+    "domain": "finance-communications",
+    "intents": ["investor", "update", "metrics", "board", "fundraising", "narrative"],
+    "questionPatterns": [
+      "What should this update primarily accomplish?",
+      "Which signal should lead the narrative: growth, retention, efficiency, product progress, or risks?",
+      "How candid should the risk section be?"
+    ],
+    "chipExamples": [
+      "Build confidence",
+      "Explain risks",
+      "Ask for help",
+      "Prepare for fundraising"
+    ],
+    "appliesWhen": [
+      "The request involves investor updates, board materials, fundraising narrative, or operating metrics."
+    ]
+  },
+  {
+    "id": "content-production",
+    "domain": "content",
+    "intents": ["content", "linkedin", "blog", "webinar", "newsletter", "social"],
+    "questionPatterns": [
+      "What should the content plan optimize for first?",
+      "Which audience should the content speak to most directly?",
+      "What cadence feels realistic for the team?"
+    ],
+    "chipExamples": [
+      "Lead generation",
+      "Authority building",
+      "Product education",
+      "Community engagement"
+    ],
+    "appliesWhen": [
+      "The request involves content calendars, social posts, webinars, newsletters, or editorial planning."
+    ]
+  },
+  {
+    "id": "workflow-ops",
+    "domain": "operations",
+    "intents": ["workflow", "process", "operations", "handoff", "automation", "crm"],
+    "questionPatterns": [
+      "Where does this workflow break down today?",
+      "What should be automated versus kept human-reviewed?",
+      "Which team or role owns the final outcome?"
+    ],
+    "chipExamples": [
+      "Reduce manual work",
+      "Improve handoffs",
+      "Increase visibility",
+      "Prevent missed follow-ups"
+    ],
+    "appliesWhen": [
+      "The request involves internal processes, CRM workflows, automation, ownership, or repeated operations."
+    ]
+  }
+]

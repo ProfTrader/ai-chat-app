@@ -33,7 +33,9 @@ import {
   parseChipsMarker,
   parsePlanReadyMarker,
   requestPlan,
+  requestPlanIntake,
   stripPlanMarkers,
+  type PlanIntakeDraft,
 } from "@/lib/plan/client";
 import {
   encodeAutomationMarker,
@@ -218,44 +220,101 @@ function shouldFinalizePlanIntakeAfterAnswer(previousMessages: Message[], answer
   return planQuestionCount(previousMessages) >= 3;
 }
 
-const PLAN_INTAKE_QUESTIONS = [
-  {
-    question: "What should this launch plan optimize for first?",
-    choices: [
-      "Land the first 50 paying firms within 6 months",
-      "Generate 50+ qualified demos within 90 days",
-      "Build trust and authority before pushing conversion",
-      "Launch one feature-specific GTM motion",
-    ],
-  },
-  {
-    question: "What monthly marketing budget should the plan assume?",
-    choices: [
-      "Under $2,500 - lean organic/content-led",
-      "$2,500-$5,000 - organic plus light paid tests",
-      "$5,000-$10,000 - paid plus content engine",
-      "Over $10,000 - accelerated multi-channel",
-    ],
-  },
-  {
-    question: "Which go-to-market motion should anchor the plan?",
-    choices: [
-      "Inbound content + SEO for solo and small law searches",
-      "LinkedIn thought leadership + paid ads to attorneys",
-      "Legal association partnerships + webinars",
-      "Targeted outbound to high-volume intake practices",
-    ],
-  },
-] as const;
+interface FallbackPlanQuestion {
+  question: string;
+  choices: string[];
+}
 
-function buildDeterministicPlanQuestion(index: number) {
-  const item = PLAN_INTAKE_QUESTIONS[index];
+function fallbackPlanQuestions(request: string): FallbackPlanQuestion[] {
+  const input = request.toLowerCase();
+  if (/\b(onboard|implementation|customer|client|dashboard|security|legal|data)\b/.test(input)) {
+    return [
+      {
+        question: "What risk should the onboarding plan reduce first?",
+        choices: [
+          "Messy data blocking dashboard accuracy",
+          "Security/legal review delaying launch",
+          "Executive dashboard due within 30 days",
+          "Customer adoption after the first dashboard",
+        ],
+      },
+      {
+        question: "Who should be the primary acceptance owner for the first dashboard?",
+        choices: [
+          "VP of Sales",
+          "Customer admin or data owner",
+          "Security/legal approver",
+          "Joint implementation lead",
+        ],
+      },
+      {
+        question: "Which readiness area is weakest right now?",
+        choices: [
+          "Source data access and cleanup",
+          "Dashboard requirements",
+          "Security documentation",
+          "Stakeholder alignment",
+        ],
+      },
+    ];
+  }
+  if (/\b(hir|recruit|candidate|interview|role)\b/.test(input)) {
+    return [
+      {
+        question: "What should the hiring plan optimize for first?",
+        choices: ["Speed to offer", "High-quality signal", "Candidate experience", "Team alignment"],
+      },
+      {
+        question: "Which role capability is non-negotiable?",
+        choices: ["Craft quality", "Systems thinking", "Domain experience", "Leadership potential"],
+      },
+      {
+        question: "How structured should the interview loop be?",
+        choices: ["Lightweight", "Standardized scorecard", "Work-sample heavy", "Panel-driven"],
+      },
+    ];
+  }
+  if (/\b(bug|qa|release|test|regression|rollback)\b/.test(input)) {
+    return [
+      {
+        question: "What release risk should the plan reduce first?",
+        choices: ["Critical regressions", "Customer-facing workflows", "Data integrity", "Rollback readiness"],
+      },
+      {
+        question: "How strict should the release criteria be?",
+        choices: ["Block only severe issues", "Block high-priority defects", "Require full regression pass", "Require stakeholder signoff"],
+      },
+      {
+        question: "Which area needs the deepest coverage?",
+        choices: ["Core product flows", "Integrations", "Permissions/security", "Reporting/analytics"],
+      },
+    ];
+  }
+  return [
+    {
+      question: "What outcome should this plan optimize for first?",
+      choices: ["Speed", "Quality", "Risk reduction", "Stakeholder confidence"],
+    },
+    {
+      question: "Which constraint should shape the plan most?",
+      choices: ["Timeline", "Team capacity", "Budget", "Approval risk"],
+    },
+    {
+      question: "What should require explicit approval before execution?",
+      choices: ["External communications", "Security-sensitive work", "Spend or vendor decisions", "Final deliverables"],
+    },
+  ];
+}
+
+function buildFallbackPlanQuestion(index: number, request: string) {
+  const questions = fallbackPlanQuestions(request);
+  const item = questions[index];
   if (!item) return null;
   const visibleChoices = item.choices
     .map((choice, choiceIndex) => `${String.fromCharCode(65 + choiceIndex)}. ${choice}`)
     .join("\n");
   return [
-    `Question ${index + 1} of ${PLAN_INTAKE_QUESTIONS.length}: ${item.question}`,
+    `Question ${index + 1} of ${questions.length}: ${item.question}`,
     "",
     visibleChoices,
     "",
@@ -263,7 +322,7 @@ function buildDeterministicPlanQuestion(index: number) {
   ].join("\n");
 }
 
-function deterministicPlanQuestionIndex(messages: Message[]) {
+function fallbackPlanQuestionIndex(messages: Message[]) {
   const latestAssistant = [...planScopedMessages(messages)]
     .reverse()
     .find((message) => message.role === "assistant");
@@ -275,7 +334,7 @@ function deterministicPlanQuestionIndex(messages: Message[]) {
     return null;
   }
   const progress = extractPlanQuestionProgress(latestAssistant.content);
-  if (!progress || progress.total !== PLAN_INTAKE_QUESTIONS.length) return null;
+  if (!progress || progress.total < 1 || progress.total > 4) return null;
   return progress.current - 1;
 }
 
@@ -321,6 +380,39 @@ function buildPlanIntakeSummary(messages: Message[]) {
     "",
     "[[nexus:plan-ready]]",
   ].join("\n");
+}
+
+function previousPlanQuestions(messages: Message[]) {
+  return planScopedMessages(messages)
+    .filter((message) => message.role === "assistant")
+    .filter((message) => !messageHasPlanArtifact(message.content))
+    .map((message) => planCardQuestion(message.content))
+    .filter((question) => question.includes("?") && !messageHasPlanArtifact(question))
+    .slice(-6);
+}
+
+function messageHasPlanArtifact(text: string) {
+  return text.includes("[[nexus:plan:") || text.includes("[[nexus:plan-ready]]");
+}
+
+function formatPlanIntakeMessage(intake: PlanIntakeDraft, questionCount: number) {
+  const question = intake.question.trim() || "I have enough context to draft the editable plan now.";
+  if (intake.ready) {
+    return [question, "", "[[nexus:plan-ready]]"].join("\n");
+  }
+
+  const chips = intake.chips.map((chip) => chip.trim()).filter(Boolean).slice(0, 4);
+  const visibleChoices = chips
+    .map((choice, index) => `${String.fromCharCode(65 + index)}. ${choice}`)
+    .join("\n");
+
+  return [
+    `Question ${Math.min(questionCount + 1, 4)} of ~4: ${question}`,
+    visibleChoices ? `\n${visibleChoices}` : "",
+    chips.length ? `\n[[nexus:chips]]${JSON.stringify(chips)}[[/nexus:chips]]` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function slugify(value: string) {
@@ -612,6 +704,7 @@ export function ChatSessionProvider({
   const buildPlanTasks = useDataStore((s) => s.buildPlanTasks);
   const automatePlan = useDataStore((s) => s.automatePlan);
   const schedulePlan = useDataStore((s) => s.schedulePlan);
+  const getPlan = useDataStore((s) => s.getPlan);
   const {
     projects,
     workspaces,
@@ -1074,6 +1167,48 @@ export function ChatSessionProvider({
     }
   };
 
+  const draftOrganicPlanIntake = async () => {
+    if (!sessionId || planBusy) return;
+    setPlanBusy(true);
+    try {
+      const history = getMessagesBySession(sessionId);
+      const userMessages = history.filter((message) => message.role === "user");
+      const latestPlanningRequest = [...userMessages]
+        .reverse()
+        .find((message) => shouldClarify(stripNexusMarkers(message.content)));
+      const request =
+        stripNexusMarkers(latestPlanningRequest?.content ?? "") ||
+        stripNexusMarkers(userMessages[userMessages.length - 1]?.content ?? "") ||
+        "Draft a plan for the current project.";
+      const conversation = history
+        .slice(-20)
+        .map((message) => `${message.role}: ${stripNexusMarkers(message.content)}`)
+        .filter((line) => line.split(": ").slice(1).join(": ").trim().length > 0)
+        .join("\n");
+      const questions = previousPlanQuestions(history);
+      const intake = await requestPlanIntake({
+        request,
+        projectName: project?.name,
+        conversation,
+        model: authStatus?.model,
+        previousQuestions: questions,
+        memories: agentMemories
+          .filter((memory) => memory.projectId === activeProjectId)
+          .slice(0, 8)
+          .map((memory) => ({
+            kind: memory.kind,
+            title: memory.title,
+            body: memory.body,
+            confidence: memory.confidence,
+          })),
+      });
+      await persistChatMessage(sessionId, formatPlanIntakeMessage(intake, questions.length), "assistant");
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
   const send = async (text: string) => {
     if (!sessionId) {
       toast.error("Select or create a session first.");
@@ -1218,54 +1353,58 @@ export function ChatSessionProvider({
       setComposerMode("plan");
     }
 
-    const deterministicQuestionIndex = deterministicPlanQuestionIndex(previousMessages);
-    if (planModeForTurn && deterministicQuestionIndex !== null) {
-      const nextQuestionIndex = deterministicQuestionIndex + 1;
-      if (nextQuestionIndex < PLAN_INTAKE_QUESTIONS.length) {
-        const nextQuestion = buildDeterministicPlanQuestion(nextQuestionIndex);
-        if (nextQuestion) {
-          await persistChatMessage(sessionId, nextQuestion, "assistant");
+    if (planModeForTurn) {
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      try {
+        await draftOrganicPlanIntake();
+        return;
+      } catch (error) {
+        console.warn("Organic plan intake failed; falling back to deterministic intake.", error);
+      }
+
+      const fallbackQuestionIndex = fallbackPlanQuestionIndex(previousMessages);
+      const fallbackQuestions = fallbackPlanQuestions(cleanText);
+      if (fallbackQuestionIndex !== null) {
+        const nextQuestionIndex = fallbackQuestionIndex + 1;
+        if (nextQuestionIndex < fallbackQuestions.length) {
+          const nextQuestion = buildFallbackPlanQuestion(nextQuestionIndex, cleanText);
+          if (nextQuestion) {
+            await persistChatMessage(sessionId, nextQuestion, "assistant");
+            chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+            return;
+          }
+        }
+
+        const history = getMessagesBySession(sessionId);
+        chat.setMessages(history.map(messageToUi));
+        await draftPlanFromConversation(buildPlanIntakeSummary(history));
+        return;
+      }
+
+      if (autoPlanRequest || shouldClarify(cleanText)) {
+        const firstQuestion = buildFallbackPlanQuestion(0, cleanText);
+        if (firstQuestion) {
+          await persistChatMessage(sessionId, firstQuestion, "assistant");
           chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
           return;
         }
       }
 
-      const history = getMessagesBySession(sessionId);
-      chat.setMessages(history.map(messageToUi));
-      await draftPlanFromConversation(buildPlanIntakeSummary(history));
-      return;
-    }
+      if (latestAssistantNeedsPlanAnswer(previousMessages) && !shouldClarify(cleanText)) {
+        const history = getMessagesBySession(sessionId);
+        chat.setMessages(history.map(messageToUi));
+        await draftPlanFromConversation(buildPlanIntakeSummary(history));
+        return;
+      }
 
-    if (planModeForTurn && (autoPlanRequest || shouldClarify(cleanText))) {
-      const firstQuestion = buildDeterministicPlanQuestion(0);
-      if (firstQuestion) {
-        await persistChatMessage(sessionId, firstQuestion, "assistant");
-        chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      if (shouldFinalizePlanIntakeAfterAnswer(previousMessages, cleanText)) {
+        const history = getMessagesBySession(sessionId);
+        chat.setMessages(history.map(messageToUi));
+        await draftPlanFromConversation(buildPlanIntakeSummary(history));
         return;
       }
     }
 
-    if (
-      planModeForTurn &&
-      latestAssistantNeedsPlanAnswer(previousMessages) &&
-      !shouldClarify(cleanText)
-    ) {
-      const history = getMessagesBySession(sessionId);
-      chat.setMessages(history.map(messageToUi));
-      await draftPlanFromConversation(buildPlanIntakeSummary(history));
-      return;
-    }
-
-    if (planModeForTurn && shouldFinalizePlanIntakeAfterAnswer(previousMessages, cleanText)) {
-      const history = getMessagesBySession(sessionId);
-      chat.setMessages(history.map(messageToUi));
-      await draftPlanFromConversation(buildPlanIntakeSummary(history));
-      return;
-    }
-
-    // Plan Mode owns the turn: the model runs its own one-question-per-turn
-    // Socratic intake (plan-question / plan-proposal markers), so we bypass the
-    // deterministic task/clarify routing and go straight to the model.
     if (!planModeForTurn) {
       // Natural-language "create tasks…" routes to the task-proposal artifact
       // (the user message is already persisted above).
@@ -1696,10 +1835,29 @@ export function ChatSessionProvider({
   // the pipeline — automations, scheduling, and downloadable deliverables —
   // each posted as its own artifact card, finishing in Auto mode.
   const buildPlan = async (planId: string) => {
+    const plan = getPlan(planId);
     const created = buildPlanTasks(planId);
     const automations = automatePlan(planId);
     const schedule = schedulePlan(planId);
     setComposerMode("auto");
+
+    if (plan) {
+      const approvalSignal = `The user approved "${plan.title}" with ${plan.steps.length} editable steps. For similar plans, prefer this level of structure and keep approval-gated steps explicit.`;
+      recordAgentMemory({
+        projectId: plan.projectId ?? activeProjectId,
+        title: "Planning preference - approved structure",
+        body: approvalSignal,
+        kind: "preference",
+        source: "user",
+        confidence: 0.8,
+        pinned: true,
+      });
+      void appendAgentNote(
+        "memory.md",
+        `Planning preference — ${project?.name ?? "workspace"}`,
+        approvalSignal,
+      );
+    }
 
     if (sessionId) {
       const taskLine =

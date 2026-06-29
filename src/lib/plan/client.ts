@@ -46,6 +46,21 @@ interface PlanResponse {
   plan: PlanDraft;
 }
 
+export interface PlanIntakeDraft {
+  question: string;
+  chips: string[];
+  ready: boolean;
+  rationale?: string;
+  memorySignals?: string[];
+}
+
+interface PlanIntakeResponse {
+  provider: string;
+  model: string;
+  retrievedCorpus: string[];
+  intake: PlanIntakeDraft;
+}
+
 function findBalancedJsonObject(content: string) {
   const start = content.indexOf("{");
   if (start === -1) return null;
@@ -101,6 +116,27 @@ export async function requestPlan(input: {
     throw Object.assign(new Error(data.message ?? "Failed to draft plan"), { code: data.code });
   }
   return (data as PlanResponse).plan;
+}
+
+export async function requestPlanIntake(input: {
+  request: string;
+  projectName?: string;
+  conversation?: string;
+  model?: string;
+  previousQuestions?: string[];
+  memories?: Array<{ kind?: string; title?: string; body?: string; confidence?: number }>;
+}): Promise<PlanIntakeDraft> {
+  const response = await fetch("/api/plan/intake", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = parsePlanResponseBody(await response.text());
+  if (!response.ok) {
+    throw Object.assign(new Error(data.message ?? "Failed to draft intake question"), { code: data.code });
+  }
+  return (data as unknown as PlanIntakeResponse).intake;
 }
 
 const STEP_TIERS: PlanStepTier[] = ["automatic", "strict", "approval"];

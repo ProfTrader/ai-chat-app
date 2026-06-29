@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
+import { useSelectionStore } from "@/stores/selection-store";
 import { useChatSession } from "@/lib/chat/chat-session-provider";
+import { appendAgentNote } from "@/lib/agent-files/client";
 import type { PlanStep, PlanStepTier } from "@/lib/plan/client";
 
 const TIERS: PlanStepTier[] = ["automatic", "strict", "approval"];
@@ -39,6 +41,8 @@ export function PlanArtifact({ planId }: { planId: string }) {
   const plan = useDataStore((s) => s.plans.find((p) => p.id === planId));
   const updatePlan = useDataStore((s) => s.updatePlan);
   const setPlanStatus = useDataStore((s) => s.setPlanStatus);
+  const recordAgentMemory = useDataStore((s) => s.recordAgentMemory);
+  const fallbackProjectId = useSelectionStore((s) => s.projectId);
   const { buildPlan } = useChatSession();
   const [busy, setBusy] = useState(false);
 
@@ -66,6 +70,23 @@ export function PlanArtifact({ planId }: { planId: string }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const discard = () => {
+    setPlanStatus(plan.id, "discarded");
+    const projectId = plan.projectId ?? fallbackProjectId;
+    if (!projectId) return;
+    const signal = `The user dismissed "${plan.title}". For similar planning requests, ask a sharper intake question before drafting and avoid assuming this structure is acceptable.`;
+    recordAgentMemory({
+      projectId,
+      title: "Planning preference - dismissed draft",
+      body: signal,
+      kind: "preference",
+      source: "user",
+      confidence: 0.75,
+      pinned: false,
+    });
+    void appendAgentNote("memory.md", "Planning preference - dismissed draft", signal);
   };
 
   return (
@@ -247,7 +268,7 @@ export function PlanArtifact({ planId }: { planId: string }) {
             size="sm"
             className="text-muted-foreground"
             disabled={busy}
-            onClick={() => setPlanStatus(plan.id, "discarded")}
+            onClick={discard}
           >
             <X data-icon="inline-start" />
             Discard
