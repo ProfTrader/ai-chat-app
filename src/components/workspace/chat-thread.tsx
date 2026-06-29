@@ -9,7 +9,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useShellStore } from "@/stores/shell-store";
 import { cn } from "@/lib/utils";
+import dexterAvatar from "@/assets/dexter-avatar.png";
 
 const STARTER_PROMPTS = [
   "What should we tackle this week?",
@@ -79,11 +80,12 @@ function LiveAssistantStatus({ activity }: { activity?: ChatActivity }) {
     <Message align="start" role="status" aria-live="polite">
       <MessageAvatar className="bg-transparent">
         <Avatar size="sm" className="bg-primary/10">
+          <AvatarImage src={dexterAvatar} alt="Dexter avatar" />
           <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
         </Avatar>
       </MessageAvatar>
       <MessageContent className="items-start">
-        <div className="flex w-fit items-center gap-2.5 rounded-2xl border border-border/70 bg-muted/40 px-3 py-2 shadow-sm">
+        <div className="flex w-fit items-center gap-2.5 rounded-[18px] border border-border/70 bg-muted/40 px-3 py-2 shadow-sm">
           <TypingDots />
           <span className="shimmer shimmer-duration-1000 text-xs text-muted-foreground">
             {label ? (

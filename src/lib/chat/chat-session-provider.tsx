@@ -18,7 +18,6 @@ import { useShellStore } from "@/stores/shell-store";
 import { useOnboardingStore } from "@/stores/onboarding-store";
 import { draftEmail as draftEmailApi, encodeEmailMarker } from "@/lib/email/client";
 import { proposeTasks as proposeTasksApi, encodeTasksMarker } from "@/lib/tasks/client";
-import { requestClarify, encodeClarifyMarker } from "@/lib/clarify/client";
 import { appendAgentNote } from "@/lib/agent-files/client";
 import {
   encodeDocMarker,
@@ -27,8 +26,23 @@ import {
   slugifyFilename,
 } from "@/lib/docs/client";
 import { stripNexusMarkers } from "@/lib/chat/attachments";
+import { getReaction } from "@/lib/chat/reactions";
+import {
+  encodePlanMarker,
+  extractChoicesFromMessage,
+  parseChipsMarker,
+  parsePlanReadyMarker,
+  requestPlan,
+  stripPlanMarkers,
+} from "@/lib/plan/client";
+import {
+  encodeAutomationMarker,
+  encodeDeliverablesMarker,
+  encodeScheduleMarker,
+} from "@/lib/automation/client";
 import type {
   AgentBrainStage,
+  ComposerMode,
   Contact,
   Message,
   PendingArtifactPlan,
@@ -89,6 +103,224 @@ function shouldClarify(text: string) {
       input,
     );
   return buildVerb && deliverable;
+}
+
+function planCardQuestion(text: string) {
+  const lines = stripPlanMarkers(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const questionLine = lines.find((line) => line.includes("?"));
+  if (!questionLine) return lines.join("\n");
+
+  const shortQuestion = questionLine.match(/(?:\*\*)?\s*Q\d+\s*[.:]\s*(?:\*\*)?\s*([^?]*\?)/i);
+  if (shortQuestion?.[1]) return shortQuestion[1].trim();
+
+  const numberedQuestion = questionLine.match(
+    /(?:\*\*)?Question\s+\d+\s+of\s+~?\d+\s*:?(?:\*\*)?\s*([^?]*\?)/i,
+  );
+  if (numberedQuestion?.[1]) return numberedQuestion[1].trim();
+
+  const questionSentence = questionLine.match(/[^.?!]*\?/);
+  return (questionSentence?.[0] ?? questionLine)
+    .replace(/^\*\*(.+)\*\*$/, "$1")
+    .replace(/^Question\s+\d+\s+of\s+~?\d+\s*:\s*/i, "")
+    .trim();
+}
+
+function bestPlanChoices(markerChips: string[], proseChoices: string[]) {
+  const source = proseChoices.length > 0 ? proseChoices : markerChips;
+  return source.filter(
+    (choice, index) =>
+      choice.trim().length > 0 &&
+      source.findIndex((candidate) => candidate.toLowerCase() === choice.toLowerCase()) === index,
+  );
+}
+
+function extractPlanQuestionProgress(text: string) {
+  const match = stripPlanMarkers(text).match(/Question\s+(\d+)\s+of\s+~?(\d+)/i);
+  if (!match) return null;
+  const current = Number.parseInt(match[1], 10);
+  const total = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total < 1) return null;
+  return {
+    current: Math.min(total, Math.max(1, current)),
+    total,
+  };
+}
+
+function planCardProgress(text: string, fallbackCurrent: number) {
+  const progress = extractPlanQuestionProgress(text);
+  const blockCount = planQuestionBlockCount(text);
+  if (!progress && blockCount > 1) {
+    return {
+      current: 1,
+      total: blockCount,
+    };
+  }
+  if (!progress) {
+    return {
+      current: Math.min(4, Math.max(1, fallbackCurrent)),
+      total: 4,
+    };
+  }
+  return progress;
+}
+
+function planScopedMessages(messages: Message[]) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user" && shouldClarify(stripNexusMarkers(message.content))) {
+      return messages.slice(i);
+    }
+  }
+  return messages;
+}
+
+function planQuestionCount(messages: Message[]) {
+  return planScopedMessages(messages).filter((message) => {
+    if (message.role !== "assistant") return false;
+    if (message.content.includes("[[nexus:plan:") || message.content.includes("[[nexus:plan-ready]]")) {
+      return false;
+    }
+    return planCardQuestion(message.content).includes("?");
+  }).length;
+}
+
+function planQuestionBlockCount(text: string) {
+  const matches = stripPlanMarkers(text).match(/(?:^|\n)\s*(?:\*\*)?\s*(?:Q\d+|Question\s+\d+)\b[\s\S]*?\?/gi);
+  return matches?.length ?? 0;
+}
+
+function answerCoversMultiplePlanQuestions(answer: string) {
+  const clean = stripNexusMarkers(answer);
+  const selectedLetters = new Set(clean.match(/\b[A-D]\b/gi)?.map((letter) => letter.toUpperCase()) ?? []);
+  return selectedLetters.size >= 2 || (/\b(and|plus|with)\b|[,;\n]/i.test(clean) && clean.length > 24);
+}
+
+function shouldFinalizePlanIntakeAfterAnswer(previousMessages: Message[], answer: string) {
+  const scoped = planScopedMessages(previousMessages);
+  const latestAssistant = [...scoped].reverse().find((message) => message.role === "assistant");
+  if (!latestAssistant) return false;
+  if (
+    latestAssistant.content.includes("[[nexus:plan:") ||
+    latestAssistant.content.includes("[[nexus:plan-ready]]")
+  ) {
+    return false;
+  }
+  if (!planCardQuestion(latestAssistant.content).includes("?")) return false;
+
+  const progress = extractPlanQuestionProgress(latestAssistant.content);
+  if (progress && progress.current >= progress.total) return true;
+  if (planQuestionBlockCount(latestAssistant.content) >= 2) {
+    return answerCoversMultiplePlanQuestions(answer);
+  }
+  return planQuestionCount(previousMessages) >= 3;
+}
+
+const PLAN_INTAKE_QUESTIONS = [
+  {
+    question: "What should this launch plan optimize for first?",
+    choices: [
+      "Land the first 50 paying firms within 6 months",
+      "Generate 50+ qualified demos within 90 days",
+      "Build trust and authority before pushing conversion",
+      "Launch one feature-specific GTM motion",
+    ],
+  },
+  {
+    question: "What monthly marketing budget should the plan assume?",
+    choices: [
+      "Under $2,500 - lean organic/content-led",
+      "$2,500-$5,000 - organic plus light paid tests",
+      "$5,000-$10,000 - paid plus content engine",
+      "Over $10,000 - accelerated multi-channel",
+    ],
+  },
+  {
+    question: "Which go-to-market motion should anchor the plan?",
+    choices: [
+      "Inbound content + SEO for solo and small law searches",
+      "LinkedIn thought leadership + paid ads to attorneys",
+      "Legal association partnerships + webinars",
+      "Targeted outbound to high-volume intake practices",
+    ],
+  },
+] as const;
+
+function buildDeterministicPlanQuestion(index: number) {
+  const item = PLAN_INTAKE_QUESTIONS[index];
+  if (!item) return null;
+  const visibleChoices = item.choices
+    .map((choice, choiceIndex) => `${String.fromCharCode(65 + choiceIndex)}. ${choice}`)
+    .join("\n");
+  return [
+    `Question ${index + 1} of ${PLAN_INTAKE_QUESTIONS.length}: ${item.question}`,
+    "",
+    visibleChoices,
+    "",
+    `[[nexus:chips]]${JSON.stringify(item.choices)}[[/nexus:chips]]`,
+  ].join("\n");
+}
+
+function deterministicPlanQuestionIndex(messages: Message[]) {
+  const latestAssistant = [...planScopedMessages(messages)]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!latestAssistant) return null;
+  if (
+    latestAssistant.content.includes("[[nexus:plan:") ||
+    latestAssistant.content.includes("[[nexus:plan-ready]]")
+  ) {
+    return null;
+  }
+  const progress = extractPlanQuestionProgress(latestAssistant.content);
+  if (!progress || progress.total !== PLAN_INTAKE_QUESTIONS.length) return null;
+  return progress.current - 1;
+}
+
+function latestAssistantNeedsPlanAnswer(messages: Message[]) {
+  const latestAssistant = [...planScopedMessages(messages)]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (!latestAssistant) return false;
+  if (
+    latestAssistant.content.includes("[[nexus:plan:") ||
+    latestAssistant.content.includes("[[nexus:plan-ready]]")
+  ) {
+    return false;
+  }
+  return planCardQuestion(latestAssistant.content).includes("?");
+}
+
+function buildPlanIntakeSummary(messages: Message[]) {
+  const pairs: Array<{ question: string; answer: string }> = [];
+  let pendingQuestion: string | null = null;
+
+  for (const message of planScopedMessages(messages)) {
+    if (message.role === "assistant") {
+      const question = planCardQuestion(message.content);
+      pendingQuestion = question.includes("?") ? question : null;
+      continue;
+    }
+    if (message.role === "user" && pendingQuestion) {
+      const answer = stripNexusMarkers(message.content).trim();
+      if (answer) pairs.push({ question: pendingQuestion, answer });
+      pendingQuestion = null;
+    }
+  }
+
+  const bullets = pairs.slice(-5).map((pair) => `- ${pair.question} ${pair.answer}`);
+  return [
+    "I have enough to draft the plan.",
+    "",
+    "Intake summary:",
+    ...(bullets.length ? bullets : ["- I will use the plan details from this conversation."]),
+    "",
+    "Generating the editable plan now.",
+    "",
+    "[[nexus:plan-ready]]",
+  ].join("\n");
 }
 
 function slugify(value: string) {
@@ -288,6 +520,12 @@ interface ChatSessionContextValue {
   error: Error | undefined;
   activities: ChatActivity[];
   pendingBriefPlan: PendingArtifactPlan | null;
+  planIntake: PlanIntake | null;
+  planChips: string[];
+  planReady: boolean;
+  planBusy: boolean;
+  generatePlan: () => Promise<void>;
+  buildPlan: (planId: string) => Promise<void>;
   artifactBusy: boolean;
   send: (text: string) => Promise<void>;
   composeEmail: (instruction: string) => Promise<void>;
@@ -300,6 +538,7 @@ interface ChatSessionContextValue {
     note: string,
   ) => Promise<void>;
   decidePendingBriefPlan: (decision: "create" | "dismiss") => Promise<void>;
+  reactToMessage: (message: UIMessage, emoji: string) => void;
   stop: () => void;
 }
 
@@ -311,6 +550,16 @@ export interface ChatActivity {
   toolName: string;
   provider?: string;
   model?: string;
+}
+
+interface PlanIntake {
+  question: string;
+  chips: string[];
+  ready: boolean;
+  progress: {
+    current: number;
+    total: number;
+  };
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -357,6 +606,12 @@ export function ChatSessionProvider({
   const completeAgentBrainRun = useDataStore((s) => s.completeAgentBrainRun);
   const recordAgentObservation = useDataStore((s) => s.recordAgentObservation);
   const recordAgentMemory = useDataStore((s) => s.recordAgentMemory);
+  const toggleMessageReaction = useDataStore((s) => s.toggleMessageReaction);
+  const addNotification = useDataStore((s) => s.addNotification);
+  const createPlan = useDataStore((s) => s.createPlan);
+  const buildPlanTasks = useDataStore((s) => s.buildPlanTasks);
+  const automatePlan = useDataStore((s) => s.automatePlan);
+  const schedulePlan = useDataStore((s) => s.schedulePlan);
   const {
     projects,
     workspaces,
@@ -368,7 +623,8 @@ export function ChatSessionProvider({
   } = useDataStore();
   const pendingArtifactPlans = useDataStore((s) => s.pendingArtifactPlans);
   const { projectId, contextChips } = useSelectionStore();
-  const { composerMode } = useChatStore();
+  const { composerMode, setComposerMode } = useChatStore();
+  const [planBusy, setPlanBusy] = useState(false);
   const onboardingProfile = useOnboardingStore((s) => s.profile);
   const onboardingAnswers = useOnboardingStore((s) => s.answers);
   const { status: authStatus } = useAuthStore();
@@ -377,6 +633,7 @@ export function ChatSessionProvider({
   const [activities, setActivities] = useState<ChatActivity[]>([]);
   const [artifactBusy, setArtifactBusy] = useState(false);
   const activeBrainRunIdRef = useRef<string | null>(null);
+  const composerModeForRequestRef = useRef<ComposerMode | null>(null);
 
   const project = projects.find((p) => p.id === projectId);
   const activeProjectId = projectId ?? project?.id ?? projects[0]?.id ?? "proj-1";
@@ -411,7 +668,7 @@ export function ChatSessionProvider({
             projectName: project?.name,
             projectSlug: project?.slug,
             workspaceName: workspace?.name,
-            composerMode,
+            composerMode: composerModeForRequestRef.current ?? composerMode,
             contextChips,
             model: authStatus?.model,
             tasksSummary: projectId
@@ -765,6 +1022,58 @@ export function ChatSessionProvider({
     await produceApprovedBriefPlan(pendingBriefPlan);
   };
 
+  const draftPlanFromConversation = async (readyMessage?: string) => {
+    if (!sessionId || planBusy) return;
+    if (!authStatus?.connected) {
+      toast.warning("Connect a model to draft a plan.");
+      setSettingsOpen(true);
+      return;
+    }
+    setPlanBusy(true);
+    try {
+      if (readyMessage) {
+        await persistChatMessage(sessionId, readyMessage, "assistant");
+        chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+      }
+
+      const history = getMessagesBySession(sessionId);
+      const userMessages = history.filter((message) => message.role === "user");
+      const latestPlanningRequest = [...userMessages]
+        .reverse()
+        .find((message) => shouldClarify(stripNexusMarkers(message.content)));
+      const request =
+        stripNexusMarkers(latestPlanningRequest?.content ?? "") ||
+        stripNexusMarkers(userMessages[userMessages.length - 1]?.content ?? "") ||
+        "Draft a plan for the current project.";
+      const conversation = history
+        .slice(-20)
+        .map((message) => `${message.role}: ${stripNexusMarkers(message.content)}`)
+        .filter((line) => line.split(": ").slice(1).join(": ").trim().length > 0)
+        .join("\n");
+      const draft = await requestPlan({
+        request,
+        projectName: project?.name,
+        conversation,
+        model: authStatus?.model,
+      });
+      const record = createPlan({
+        projectId: projectId || undefined,
+        sessionId,
+        draft,
+      });
+      await persistChatMessage(
+        sessionId,
+        `Here's the plan I drafted from our conversation — review and edit it, then build when you're ready.\n\n${encodePlanMarker(record.id)}`,
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to draft the plan.");
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
   const send = async (text: string) => {
     if (!sessionId) {
       toast.error("Select or create a session first.");
@@ -901,17 +1210,69 @@ export function ChatSessionProvider({
       return;
     }
 
-    // Natural-language "create tasks…" routes to the task-proposal artifact
-    // (the user message is already persisted above).
-    if (shouldRouteToTasks(cleanText)) {
-      await runTaskProposal(cleanText);
+    const explicitTaskRequest = composerMode !== "plan" && shouldRouteToTasks(cleanText);
+    const autoPlanRequest = composerMode !== "plan" && !explicitTaskRequest && shouldClarify(cleanText);
+    const planModeForTurn = composerMode === "plan" || autoPlanRequest;
+
+    if (autoPlanRequest) {
+      setComposerMode("plan");
+    }
+
+    const deterministicQuestionIndex = deterministicPlanQuestionIndex(previousMessages);
+    if (planModeForTurn && deterministicQuestionIndex !== null) {
+      const nextQuestionIndex = deterministicQuestionIndex + 1;
+      if (nextQuestionIndex < PLAN_INTAKE_QUESTIONS.length) {
+        const nextQuestion = buildDeterministicPlanQuestion(nextQuestionIndex);
+        if (nextQuestion) {
+          await persistChatMessage(sessionId, nextQuestion, "assistant");
+          chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+          return;
+        }
+      }
+
+      const history = getMessagesBySession(sessionId);
+      chat.setMessages(history.map(messageToUi));
+      await draftPlanFromConversation(buildPlanIntakeSummary(history));
       return;
     }
 
-    // Planning/build requests open an interactive multiple-choice intake first.
-    if (shouldClarify(cleanText)) {
-      await runClarify(cleanText);
+    if (planModeForTurn && (autoPlanRequest || shouldClarify(cleanText))) {
+      const firstQuestion = buildDeterministicPlanQuestion(0);
+      if (firstQuestion) {
+        await persistChatMessage(sessionId, firstQuestion, "assistant");
+        chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+        return;
+      }
+    }
+
+    if (
+      planModeForTurn &&
+      latestAssistantNeedsPlanAnswer(previousMessages) &&
+      !shouldClarify(cleanText)
+    ) {
+      const history = getMessagesBySession(sessionId);
+      chat.setMessages(history.map(messageToUi));
+      await draftPlanFromConversation(buildPlanIntakeSummary(history));
       return;
+    }
+
+    if (planModeForTurn && shouldFinalizePlanIntakeAfterAnswer(previousMessages, cleanText)) {
+      const history = getMessagesBySession(sessionId);
+      chat.setMessages(history.map(messageToUi));
+      await draftPlanFromConversation(buildPlanIntakeSummary(history));
+      return;
+    }
+
+    // Plan Mode owns the turn: the model runs its own one-question-per-turn
+    // Socratic intake (plan-question / plan-proposal markers), so we bypass the
+    // deterministic task/clarify routing and go straight to the model.
+    if (!planModeForTurn) {
+      // Natural-language "create tasks…" routes to the task-proposal artifact
+      // (the user message is already persisted above).
+      if (explicitTaskRequest) {
+        await runTaskProposal(cleanText);
+        return;
+      }
     }
 
     const chatRun = startAgentBrainRun({
@@ -942,7 +1303,12 @@ export function ChatSessionProvider({
       });
       void appendAgentNote("memory.md", `Preference — ${project?.name ?? "workspace"}`, cleanText);
     }
-    await chat.sendMessage({ text });
+    composerModeForRequestRef.current = planModeForTurn ? "plan" : null;
+    try {
+      await chat.sendMessage({ text });
+    } finally {
+      composerModeForRequestRef.current = null;
+    }
   };
 
   const composeEmail = async (instruction: string) => {
@@ -1088,68 +1454,6 @@ export function ChatSessionProvider({
     await runTaskProposal(instruction);
   };
 
-  // Build the interactive multiple-choice intake for a planning/build request.
-  const runClarify = async (instruction: string) => {
-    if (!sessionId) return;
-    setArtifactBusy(true);
-    // Render the user's message right away and show a descriptive status so the
-    // chat is never blank while the clarifying questions are being prepared.
-    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
-    setActivities([
-      {
-        id: "clarify-status",
-        status: "running",
-        label: "Preparing a few quick questions",
-        detail: "Reviewing your request and the project context first.",
-        toolName: "clarify",
-      },
-    ]);
-    const run = startAgentBrainRun({
-      projectId: activeProjectId,
-      sessionId,
-      request: instruction,
-      title: "Clarifying questions",
-      intent: "conversation",
-      outputKind: "conversation",
-      model: authStatus?.model,
-    });
-    activeBrainRunIdRef.current = run.id;
-    advanceAgentBrainRun(
-      run.id,
-      "plan",
-      "Preparing questions",
-      "Building a few quick multiple-choice questions before producing the deliverable.",
-    );
-    try {
-      const plan = await requestClarify(instruction, project?.name);
-      await persistChatMessage(
-        sessionId,
-        encodeClarifyMarker({ request: instruction, plan }),
-        "assistant",
-      );
-      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
-      advanceAgentBrainRun(
-        run.id,
-        "deliver",
-        "Questions ready",
-        `${plan.questions.length} quick questions awaiting your answers.`,
-      );
-      completeAgentBrainRun(run.id, "needs_approval");
-    } catch (error) {
-      completeAgentBrainRun(
-        run.id,
-        "failed",
-        error instanceof Error ? error.message : "Failed to prepare questions.",
-      );
-      // Fall back to a normal answer so the user is never stuck.
-      await chat.sendMessage({ text: instruction });
-    } finally {
-      activeBrainRunIdRef.current = null;
-      setArtifactBusy(false);
-      setActivities([]);
-    }
-  };
-
   // After the interactive questions are answered, turn the request + answers
   // into an actionable flow proposal (tasks for the board, which can then be
   // assigned, briefed, and notified on approval).
@@ -1246,12 +1550,203 @@ export function ChatSessionProvider({
     );
   };
 
+  // The user reacted to one of Dexter's messages. Persist the reaction, confirm
+  // it, and turn it into a durable learning signal: a pinned preference memory
+  // plus a memory.md note — both flow back into Dexter's system prompt on the
+  // next turn, so approvals are reinforced and mistakes are avoided.
+  const reactToMessage = (message: UIMessage, emoji: string) => {
+    if (message.role !== "assistant") return;
+    const reaction = getReaction(emoji);
+    if (!reaction) return;
+
+    const { added } = toggleMessageReaction(message.id, emoji);
+    if (!added) {
+      toast.message(`Removed ${emoji}`);
+      return;
+    }
+
+    const snippet = stripNexusMarkers(uiMessageToText(message));
+    const { title, body } = reaction.learn(snippet);
+
+    toast.success(reaction.toast);
+    recordAgentMemory({
+      projectId: activeProjectId,
+      title,
+      body,
+      kind: "preference",
+      source: "user",
+      confidence: reaction.sentiment === "negative" ? 0.9 : 0.85,
+      pinned: reaction.sentiment !== "neutral",
+    });
+    void appendAgentNote(
+      "memory.md",
+      `${title} — ${project?.name ?? "workspace"}`,
+      body,
+    );
+    addNotification({
+      type: "info",
+      title: `You reacted ${emoji} to Dexter`,
+      body: reaction.meaning,
+      projectId: activeProjectId,
+    });
+  };
+
+  // Plan Mode intake signals, derived from the latest assistant turn (cleared by
+  // a following user turn): the inline composer card uses this as the single
+  // planning surface.
+  const { planIntake, planChips, planReady } = useMemo(() => {
+    let intakeTurnCount = 0;
+    for (const message of chat.messages) {
+      if (message.role !== "assistant") continue;
+      const text = uiMessageToText(message);
+      const chips = parseChipsMarker(text).chips;
+      const ready = parsePlanReadyMarker(text).ready;
+      const cleanText = stripPlanMarkers(text);
+      if ((chips.length > 0 || ready || cleanText.includes("?")) && !text.includes("[[nexus:plan:")) {
+        intakeTurnCount += 1;
+      }
+    }
+
+    const empty: {
+      planIntake: PlanIntake | null;
+      planChips: string[];
+      planReady: boolean;
+    } = { planIntake: null, planChips: [], planReady: false };
+    for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
+      const message = chat.messages[i];
+      if (message.role === "assistant") {
+        const text = uiMessageToText(message);
+        const { chips: markerChips, cleanText: textWithoutChips } = parseChipsMarker(text);
+        const { ready, cleanText: textWithoutReady } = parsePlanReadyMarker(textWithoutChips);
+        const fullPrompt = stripPlanMarkers(textWithoutReady);
+        const proseChoices = extractChoicesFromMessage(fullPrompt);
+        const chips = bestPlanChoices(markerChips, proseChoices);
+        const question = planCardQuestion(textWithoutReady);
+        const hasQuestion = question.includes("?") || fullPrompt.includes("?");
+        if (!ready && chips.length === 0 && !hasQuestion) return empty;
+        const intake: PlanIntake = {
+          question,
+          chips,
+          ready,
+          progress: planCardProgress(textWithoutReady, intakeTurnCount),
+        };
+        return {
+          // Prefer explicit chips; otherwise derive them from an enumerated
+          // question the model asked in plain prose.
+          planIntake: intake,
+          planChips: chips,
+          planReady: ready,
+        };
+      }
+      if (message.role === "user") return empty;
+    }
+    return empty;
+  }, [chat.messages]);
+
+  // Generate the structured, editable plan from the conversation (deterministic
+  // /api/plan), store it, and post it into the thread as an artifact reference.
+  const generatePlan = async () => {
+    if (!sessionId || planBusy) return;
+    if (!authStatus?.connected) {
+      toast.warning("Connect a model to draft a plan.");
+      setSettingsOpen(true);
+      return;
+    }
+    setPlanBusy(true);
+    try {
+      const history = getMessagesBySession(sessionId);
+      const userMessages = history.filter((message) => message.role === "user");
+      const latestPlanningRequest = [...userMessages]
+        .reverse()
+        .find((message) => shouldClarify(stripNexusMarkers(message.content)));
+      const request =
+        stripNexusMarkers(latestPlanningRequest?.content ?? "") ||
+        stripNexusMarkers(userMessages[userMessages.length - 1]?.content ?? "") ||
+        "Draft a plan for the current project.";
+      const conversation = history
+        .slice(-20)
+        .map((message) => `${message.role}: ${stripNexusMarkers(message.content)}`)
+        .filter((line) => line.split(": ").slice(1).join(": ").trim().length > 0)
+        .join("\n");
+      const draft = await requestPlan({
+        request,
+        projectName: project?.name,
+        conversation,
+        model: authStatus?.model,
+      });
+      const record = createPlan({
+        projectId: projectId || undefined,
+        sessionId,
+        draft,
+      });
+      await persistChatMessage(
+        sessionId,
+        `Here's the plan I drafted from our conversation — review and edit it, then build when you're ready.\n\n${encodePlanMarker(record.id)}`,
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to draft the plan.");
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  // Approve/Build: turn the plan into board tasks, then auto-chain the rest of
+  // the pipeline — automations, scheduling, and downloadable deliverables —
+  // each posted as its own artifact card, finishing in Auto mode.
+  const buildPlan = async (planId: string) => {
+    const created = buildPlanTasks(planId);
+    const automations = automatePlan(planId);
+    const schedule = schedulePlan(planId);
+    setComposerMode("auto");
+
+    if (sessionId) {
+      const taskLine =
+        created.length > 0
+          ? `Approved. I added ${created.length} step${created.length === 1 ? "" : "s"} to the board.`
+          : `Approved — assign this chat to a project to push the steps onto a board.`;
+
+      await persistChatMessage(
+        sessionId,
+        `${taskLine} Now setting up the automation, schedule, and deliverables.`,
+        "assistant",
+      );
+      await persistChatMessage(
+        sessionId,
+        `I turned each step into an automation rule — review, pause, or resume any of them.\n\n${encodeAutomationMarker(planId)}`,
+        "assistant",
+      );
+      await persistChatMessage(
+        sessionId,
+        `Here's how the work lands on a schedule.\n\n${encodeScheduleMarker(planId)}`,
+        "assistant",
+      );
+      await persistChatMessage(
+        sessionId,
+        `And here are the deliverables — a Markdown doc, an HTML presentation, and a PowerPoint. Download or present them anytime.\n\n${encodeDeliverablesMarker(planId)}`,
+        "assistant",
+      );
+      chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    }
+
+    toast.success(
+      `Plan shipped — ${automations.length} automations, ${schedule.length} scheduled, deliverables ready`,
+    );
+  };
+
   const value: ChatSessionContextValue = {
     messages: chat.messages,
     status: chat.status,
     error: chat.error,
     activities,
     pendingBriefPlan,
+    planIntake,
+    planChips,
+    planReady,
+    planBusy,
+    generatePlan,
+    buildPlan,
     artifactBusy,
     send,
     composeEmail,
@@ -1259,6 +1754,7 @@ export function ChatSessionProvider({
     submitClarifyAnswers,
     submitDeliveryChoice,
     decidePendingBriefPlan,
+    reactToMessage,
     stop: chat.stop,
   };
 

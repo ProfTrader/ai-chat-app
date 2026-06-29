@@ -759,6 +759,255 @@ function SessionItem({
   );
 }
 
+function ChatQueueRow({
+  session,
+  isActive,
+  unread,
+  projectName,
+  workspaceProjects,
+  onOpen,
+  onAssign,
+  onArchive,
+}: {
+  session: Session;
+  isActive: boolean;
+  unread: boolean;
+  projectName: string;
+  workspaceProjects: Project[];
+  onOpen: () => void;
+  onAssign: (projectId: string) => void;
+  onArchive: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "group/chat relative flex w-full items-center overflow-hidden rounded-md px-2 text-sm",
+        isActive
+          ? "bg-active-soft text-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-16 text-left"
+        onClick={onOpen}
+      >
+        <MessageSquare className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1">
+          <span className="fade-text-r block truncate">{session.title}</span>
+          <span className="block truncate text-[11px] text-muted-foreground">
+            {projectName} · {formatRelativeTime(session.updatedAt)}
+          </span>
+        </span>
+        {unread ? <NotificationBadge count={1} /> : null}
+      </button>
+      <div className="absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/chat:opacity-100 focus-within:opacity-100">
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground"
+                      aria-label="Assign chat to a project"
+                    />
+                  }
+                />
+              }
+            >
+              <FolderOpen />
+            </TooltipTrigger>
+            <TooltipContent>Assign to project</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel>Assign to project</DropdownMenuLabel>
+            <DropdownMenuGroup>
+              {workspaceProjects.map((project) => (
+                <DropdownMenuItem
+                  key={project.id}
+                  disabled={project.id === session.projectId}
+                  onClick={() => onAssign(project.id)}
+                >
+                  <FolderOpen data-icon="inline-start" />
+                  {project.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            {session.projectId ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onAssign("")}>
+                  <Inbox data-icon="inline-start" />
+                  Unassign
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label={`Archive ${session.title}`}
+                onClick={onArchive}
+              />
+            }
+          >
+            <Archive />
+          </TooltipTrigger>
+          <TooltipContent>Archive chat</TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+function ChatQueue({ query }: { query: string }) {
+  const { sessions, projects, messages, addSession, moveSession, archiveSession } =
+    useDataStore();
+  const { workspaceId, sessionId, setProjectId, setSessionId } =
+    useSelectionStore();
+  const { setActiveView, setSidebarMode, notificationReadAt, notificationsInitializedAt } =
+    useShellStore();
+
+  const workspaceProjects = useMemo(
+    () => projects.filter((project) => project.workspaceId === workspaceId && !project.archivedAt),
+    [projects, workspaceId],
+  );
+  const workspaceProjectIds = useMemo(
+    () => new Set(workspaceProjects.map((project) => project.id)),
+    [workspaceProjects],
+  );
+  const projectNameById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects],
+  );
+
+  const unreadSessionIds = useMemo(() => {
+    const latestBySession = new Map<string, string>();
+    messages.forEach((message) => {
+      if (message.role === "user") return;
+      const previous = latestBySession.get(message.sessionId);
+      if (!previous || new Date(message.createdAt) > new Date(previous)) {
+        latestBySession.set(message.sessionId, message.createdAt);
+      }
+    });
+    const result = new Set<string>();
+    if (!notificationsInitializedAt) return result;
+    sessions.forEach((session) => {
+      const timestamp = latestBySession.get(session.id) ?? session.updatedAt;
+      const seenAt =
+        notificationReadAt[notificationKeys.session(session.id)] ?? notificationsInitializedAt;
+      if (new Date(timestamp).getTime() > new Date(seenAt).getTime()) {
+        result.add(session.id);
+      }
+    });
+    return result;
+  }, [messages, notificationReadAt, notificationsInitializedAt, sessions]);
+
+  const chatSessions = useMemo(
+    () =>
+      sessions
+        .filter((session) => !session.archivedAt)
+        .filter(
+          (session) => session.projectId === "" || workspaceProjectIds.has(session.projectId),
+        )
+        .filter((session) => session.title.toLowerCase().includes(query.toLowerCase()))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [query, sessions, workspaceProjectIds],
+  );
+
+  const openSession = (session: Session) => {
+    setProjectId(session.projectId);
+    setSessionId(session.id);
+    setActiveView("chat");
+    setSidebarMode("chat");
+  };
+
+  const createChat = async () => {
+    const session = await addSession("", "New chat");
+    setProjectId("");
+    setSessionId(session.id);
+    setActiveView("chat");
+    setSidebarMode("chat");
+    toast.success("Chat started — assign it to a project when you're ready");
+  };
+
+  const assignSession = (session: Session, nextProjectId: string) => {
+    moveSession(session.id, nextProjectId);
+    if (session.id === sessionId) setProjectId(nextProjectId);
+    toast.success(
+      nextProjectId
+        ? `Moved to ${projectNameById.get(nextProjectId) ?? "project"}`
+        : "Moved to Unassigned",
+    );
+  };
+
+  const archiveChat = (session: Session) => {
+    archiveSession(session.id);
+    if (session.id === sessionId) setSessionId(null);
+    toast.success(`${session.title} archived`);
+  };
+
+  return (
+    <div className="p-2">
+      <div className="mb-1 flex items-center gap-1 px-1 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <MessageSquare className="size-3.5" />
+          <span>Chat</span>
+        </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label="New chat"
+                onClick={() => void createChat()}
+              />
+            }
+          >
+            <Plus />
+          </TooltipTrigger>
+          <TooltipContent>New chat</TooltipContent>
+        </Tooltip>
+      </div>
+      {chatSessions.length === 0 ? (
+        <div className="rounded-md px-2 py-6 text-center text-xs text-muted-foreground">
+          No conversations yet. Start a chat and assign it to a project later.
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          {chatSessions.map((session) => (
+            <ChatQueueRow
+              key={session.id}
+              session={session}
+              isActive={session.id === sessionId}
+              unread={unreadSessionIds.has(session.id)}
+              projectName={
+                session.projectId
+                  ? projectNameById.get(session.projectId) ?? "Project"
+                  : "Unassigned"
+              }
+              workspaceProjects={workspaceProjects}
+              onOpen={() => openSession(session)}
+              onAssign={(nextProjectId) => assignSession(session, nextProjectId)}
+              onArchive={() => archiveChat(session)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QueuePanel({ query }: { query: string }) {
   const {
     projects,
@@ -933,6 +1182,10 @@ function QueuePanel({ query }: { query: string }) {
     (sum, project) => sum + sumUnreadCounts(countsForProject(project.id)),
     0,
   );
+
+  if (sidebarMode === "chat") {
+    return <ChatQueue query={query} />;
+  }
 
   if (sidebarMode === "projects") {
     return (
@@ -1258,6 +1511,15 @@ export function NavSidebar() {
           <TrialCallout />
           <div className="flex flex-col gap-0.5 px-2">
             <ModuleButton
+              icon={MessageSquare}
+              label="Chat"
+              isActive={sidebarMode === "chat"}
+              onClick={() => {
+                setSidebarMode("chat");
+                setActiveView("chat");
+              }}
+            />
+            <ModuleButton
               icon={Inbox}
               label="Inbox"
               count={unreadNotifications || inboxCount}
@@ -1310,7 +1572,7 @@ export function NavSidebar() {
         <AccountMenu />
       </aside>
 
-      <section className="flex min-w-0 flex-col">
+      <section className="flex min-w-0 flex-col bg-[var(--nav-list,transparent)]">
         <div className="flex h-11 items-center gap-1 border-b border-border px-2">
           <Tooltip>
             <TooltipTrigger
@@ -1328,13 +1590,15 @@ export function NavSidebar() {
             </TooltipTrigger>
             <TooltipContent>Hide sidebar</TooltipContent>
           </Tooltip>
-          <Search className="size-4 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
-            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-          />
+          <div className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-muted px-2 transition-colors focus-within:border-ring">
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              className="h-7 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            />
+          </div>
           <AiWorkingDot active={agentWorking || storedAgentWorking} />
           <Tooltip>
             <TooltipTrigger

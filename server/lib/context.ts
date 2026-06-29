@@ -215,8 +215,38 @@ export function buildSystemPrompt(context: ChatContext): string {
 
   const modeInstructions =
     context.composerMode === "plan"
-      ? "Respond with structured plans, numbered steps, and clear rationale. Ask clarifying questions when scope is ambiguous."
+      ? "PLAN MODE is on — follow the PLAN MODE protocol below instead of executing the task."
       : "Respond concisely with actionable CRM guidance. Prefer bullet points and direct recommendations.";
+
+  const planModeBlock =
+    context.composerMode === "plan"
+      ? `PLAN MODE IS ON — this overrides normal behavior. Your job is NOT to execute the task. Run a short, natural clarifying conversation, then signal that you are ready to draft a plan. You take no consequential action while Plan Mode is on.
+
+How you talk:
+- Ask ONE focused clarifying question per turn, in plain conversational prose, then stop and wait. Never stack multiple questions in one turn. Open with a short sentence framing WHY it matters, then ask.
+- Each question builds on the previous answer — you are narrowing, not interrogating.
+- Read before you ask: if the answer is already in the thread, the project snapshot, or earlier turns, use it — do not ask.
+- 3–5 questions is a CEILING, not a target. The moment you understand the intent well enough to draft a credible plan, stop asking.
+
+Optional quick replies — when your question has a few likely answers, you MAY append (after your prose, on its own line) a tiny JSON array of 2–4 short tappable suggestions:
+[[nexus:chips]]["Short reply A","Short reply B","Short reply C"]​[[/nexus:chips]]
+This is optional; omit it for open-ended questions. Never put your real question only inside the chips — always ask in prose first.
+
+When you have enough to plan, write one short sentence saying you're ready to draft the plan, then append this sentinel on its own line and STOP:
+[[nexus:plan-ready]]
+Do NOT write the plan yourself — the system generates the structured, editable plan from the conversation when the operator chooses to. Nothing executes until the operator approves that plan.`
+      : "";
+
+  const planModeUiContract =
+    context.composerMode === "plan"
+      ? `PLAN MODE UI CONTRACT:
+- Treat the user's initial request as the plan intent. Gather missing constraints; do not keep re-identifying the task.
+- Ask exactly one question per assistant message. Never include Q1 and Q2 in the same response.
+- When you offer multiple-choice answers, make the visible choices and [[nexus:chips]] array match exactly.
+- Prefer 4 concrete choices when the question has clear alternatives. If you show A/B/C/D, the chips array must contain all 4 in the same order.
+- Keep each chip under 120 characters.
+- When enough information is collected, summarize the gathered answers and assumptions in 3-5 concise bullets before [[nexus:plan-ready]]. Then stop.`
+      : "";
 
   const agentBrainFiles = context.agentBrainFiles?.trim();
 
@@ -226,7 +256,7 @@ Workspace: ${context.workspaceName ?? "Acme Corp"}
 Project: ${context.projectName ?? "Unknown"} (${context.projectSlug ?? "n/a"})
 Session: ${context.sessionId}
 Composer mode: ${context.composerMode}
-${agentBrainFiles ? `\n${agentBrainFiles}\n` : ""}
+${agentBrainFiles ? `\n${agentBrainFiles}\n` : ""}${planModeBlock ? `\n${planModeBlock}\n` : ""}${planModeUiContract ? `\n${planModeUiContract}\n` : ""}
 FIRM MEMORY — the durable profile of ${firmName} you work for (always honor and reference this):
 ${businessSection}
 

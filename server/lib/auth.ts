@@ -29,9 +29,17 @@ const sessions = new Map<string, AuthSession>();
 const dataDir = path.join(process.cwd(), ".data");
 const sessionsFile = path.join(dataDir, "sessions.json");
 const DEFAULT_MOONSHOT_MODEL = "kimi-k2.7-code";
+const FAST_MOONSHOT_MODEL = "kimi-k2.7-code-highspeed";
 const MOONSHOT_MODEL_ALIASES: Record<string, string> = {
   "kimi-k2.7": DEFAULT_MOONSHOT_MODEL,
+  "kimi-k2.7-fast": FAST_MOONSHOT_MODEL,
+  "kimi-k2.7-highspeed": FAST_MOONSHOT_MODEL,
 };
+
+const FAST_INTENT =
+  /\b(fast|quick|quickly|brief|short|concise|summari[sz]e|summary|tl;?dr|simple answer|one[- ]liner)\b/i;
+const REASONING_INTENT =
+  /\b(reason|reasoning|think|thinking|deep|careful|carefully|analy[sz]e|analysis|investigate|debug|diagnose|architect|design|plan|strategy|compare|trade[- ]offs?|why|root cause|step[- ]by[- ]step|code|implement|build|refactor)\b/i;
 
 let loaded = false;
 
@@ -140,6 +148,33 @@ export function resolveMoonshotModel(model?: string | null): string {
     process.env.KIMI_MODEL ??
     DEFAULT_MOONSHOT_MODEL;
   return MOONSHOT_MODEL_ALIASES[requested] ?? requested;
+}
+
+export function resolveMoonshotModelForInput(
+  userMessage: string,
+  model?: string | null,
+): string {
+  const resolved = resolveMoonshotModel(model);
+  if (!resolved.startsWith("kimi-k2.7")) return resolved;
+
+  const configuredFast =
+    process.env.MOONSHOT_FAST_MODEL ??
+    process.env.KIMI_FAST_MODEL ??
+    FAST_MOONSHOT_MODEL;
+  const configuredReasoning =
+    process.env.MOONSHOT_REASONING_MODEL ??
+    process.env.KIMI_REASONING_MODEL ??
+    DEFAULT_MOONSHOT_MODEL;
+
+  if (REASONING_INTENT.test(userMessage)) {
+    return resolveMoonshotModel(configuredReasoning);
+  }
+
+  if (FAST_INTENT.test(userMessage)) {
+    return resolveMoonshotModel(configuredFast);
+  }
+
+  return resolved;
 }
 
 export function resolveMoonshotBaseUrl(): string {

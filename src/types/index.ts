@@ -11,6 +11,22 @@ export interface Project {
   name: string;
   slug: string;
   archivedAt?: string;
+  /** When the project was created (ISO). */
+  createdAt?: string;
+  /** UserProfile id of the person who created the project. */
+  createdBy?: string;
+}
+
+export interface TeamMessage {
+  id: string;
+  projectId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string;
+  body: string;
+  /** TeamMember ids called out with an @mention. */
+  mentions: string[];
+  createdAt: string;
 }
 
 export interface Task {
@@ -35,6 +51,7 @@ export type NotificationType =
   | "flow_submitted"
   | "brief_created"
   | "email_drafted"
+  | "mention"
   | "info";
 
 export interface AppNotification {
@@ -79,6 +96,8 @@ export interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  /** Emoji reactions the user has placed on this message (assistant only). */
+  reactions?: string[];
 }
 
 export interface TeamMember {

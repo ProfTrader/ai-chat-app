@@ -115,6 +115,13 @@ export function stripNexusMarkers(text: string): string {
     .replace(/\[\[nexus:ask:[^\]]+\]\]/g, "")
     .replace(/\[\[nexus:doc:[^\]]+\]\]/g, "")
     .replace(/\[\[nexus:deliver:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:chips\]\][\s\S]*?\[\[\/nexus:chips\]\]/g, "")
+    .replace(/\[\[nexus:chips\]\][\s\S]*$/g, "")
+    .replace(/\[\[nexus:plan-ready\]\]/g, "")
+    .replace(/\[\[nexus:plan:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:automation:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:schedule:[^\]]+\]\]/g, "")
+    .replace(/\[\[nexus:deliverables:[^\]]+\]\]/g, "")
     .replace(/\n?\[\[nexus:view-brief:[^\]]+\]\]/g, "")
     .replace(/[ \t]+\n/g, "\n")
     .trim();

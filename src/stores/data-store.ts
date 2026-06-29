@@ -34,10 +34,28 @@ import type {
   TaskActivity,
   TaskStatus,
   TeamMember,
+  TeamMessage,
   WorkLoopPhase,
   WorkRun,
   Workspace,
 } from "@/types";
+import { currentUser } from "@/lib/current-user";
+import { unsplashAvatars } from "@/lib/avatars";
+import {
+  normalizePlanTier,
+  type PlanDraft,
+  type PlanRecord,
+  type PlanStatus,
+} from "@/lib/plan/client";
+import {
+  deriveAutomationFields,
+  deriveCadence,
+  deriveStartDate,
+  formatScheduleDate,
+  type AutomationRule,
+  type AutomationStatus,
+  type ScheduleEntry,
+} from "@/lib/automation/client";
 import {
   approvePlan,
   auditWorkRun,
@@ -90,6 +108,7 @@ interface DataState {
   sessions: Session[];
   messages: Message[];
   teamMembers: TeamMember[];
+  teamMessages: TeamMessage[];
   datasets: ProjectDataset[];
   agentRuns: AgentRun[];
   agentMemoryNotes: AgentMemoryNote[];
@@ -108,6 +127,9 @@ interface DataState {
   actionProposals: AgentActionProposal[];
   taskActivities: TaskActivity[];
   roadmapItems: RoadmapItem[];
+  plans: PlanRecord[];
+  automations: AutomationRule[];
+  scheduleEntries: ScheduleEntry[];
   selectedWorkRunId: string | null;
   initialize: () => Promise<void>;
   addTask: (task: Omit<Task, "id" | "createdAt" | "updatedAt" | "identifier">) => Promise<Task>;
@@ -120,8 +142,47 @@ interface DataState {
     id?: string,
   ) => Promise<Message>;
   updateMessageContent: (id: string, content: string) => Promise<void>;
+  /**
+   * Toggle an emoji reaction on a message. Returns the resulting reaction list
+   * and whether the emoji was added (true) or removed (false).
+   */
+  toggleMessageReaction: (
+    id: string,
+    emoji: string,
+  ) => { reactions: string[]; added: boolean };
+  getTeamMessagesByProject: (projectId: string) => TeamMessage[];
+  /**
+   * Post a message to a project's team chat. Each @mentioned teammate gets a
+   * notification so the call-out is reflected in the inbox.
+   */
+  postTeamMessage: (input: {
+    projectId: string;
+    body: string;
+    mentions: string[];
+  }) => TeamMessage;
   addSession: (projectId: string, title?: string) => Promise<Session>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  moveSession: (sessionId: string, projectId: string) => void;
+  createPlan: (input: {
+    projectId?: string;
+    sessionId?: string;
+    draft: PlanDraft;
+  }) => PlanRecord;
+  updatePlan: (
+    id: string,
+    patch: Partial<Pick<PlanRecord, "title" | "summary" | "steps" | "assumptions">>,
+  ) => void;
+  setPlanStatus: (id: string, status: PlanStatus) => void;
+  /** Approve a plan: turn its steps into board tasks and mark it approved. */
+  buildPlanTasks: (id: string) => Task[];
+  getPlan: (id: string) => PlanRecord | undefined;
+  /** Derive one automation rule per plan step (idempotent per plan). */
+  automatePlan: (id: string) => AutomationRule[];
+  /** Lay the plan's steps onto a schedule and stamp due dates on tasks. */
+  schedulePlan: (id: string) => ScheduleEntry[];
+  setAutomationStatus: (id: string, status: AutomationStatus) => void;
+  getAutomationsByPlan: (planId: string) => AutomationRule[];
+  getScheduleByPlan: (planId: string) => ScheduleEntry[];
   archiveSession: (sessionId: string) => void;
   addProject: (name: string, workspaceId: string) => Promise<Project>;
   applyFirmName: (name: string) => void;
@@ -231,6 +292,8 @@ interface DataState {
   getTasksByProject: (projectId: string) => Task[];
   getContactsByProject: (projectId: string) => Contact[];
   getTeamMembersByProject: (projectId: string) => TeamMember[];
+  /** All teammates across a workspace's projects — the @mention pool. */
+  getTeamMembersByWorkspace: (workspaceId: string) => TeamMember[];
   getDatasetsByProject: (projectId: string) => ProjectDataset[];
   getMessagesBySession: (sessionId: string) => Message[];
   getBrainRunsByProject: (projectId: string) => AgentBrainRun[];
@@ -248,6 +311,7 @@ type PersistedDataPayload = {
   sessions?: Session[];
   messages?: Message[];
   teamMembers?: TeamMember[];
+  teamMessages?: TeamMessage[];
   datasets?: ProjectDataset[];
   agentRuns?: AgentRun[];
   agentMemoryNotes?: AgentMemoryNote[];
@@ -266,6 +330,9 @@ type PersistedDataPayload = {
   actionProposals?: AgentActionProposal[];
   taskActivities?: TaskActivity[];
   roadmapItems?: RoadmapItem[];
+  plans?: PlanRecord[];
+  automations?: AutomationRule[];
+  scheduleEntries?: ScheduleEntry[];
   notifications?: AppNotification[];
   selectedWorkRunId?: string | null;
 };
@@ -394,12 +461,13 @@ const seedRoadmapItems: RoadmapItem[] = [];
 const ARTIFACT_SCHEMA_VERSION = 8;
 
 /** Predefined team workspaces — a ready-made template, not mock data. */
+const SEED_PROJECT_CREATED_AT = "2026-01-06T09:00:00.000Z";
 const TEAM_PROJECTS: Project[] = [
-  { id: "proj-risk", workspaceId: "ws-1", name: "Risk Team", slug: "risk" },
-  { id: "proj-marketing", workspaceId: "ws-1", name: "Marketing Team", slug: "marketing" },
-  { id: "proj-operations", workspaceId: "ws-1", name: "Operations Team", slug: "operations" },
-  { id: "proj-sales", workspaceId: "ws-1", name: "Sales Team", slug: "sales" },
-  { id: "proj-product", workspaceId: "ws-1", name: "Product Team", slug: "product" },
+  { id: "proj-risk", workspaceId: "ws-1", name: "Risk Team", slug: "risk", createdAt: SEED_PROJECT_CREATED_AT, createdBy: currentUser.id },
+  { id: "proj-marketing", workspaceId: "ws-1", name: "Marketing Team", slug: "marketing", createdAt: SEED_PROJECT_CREATED_AT, createdBy: currentUser.id },
+  { id: "proj-operations", workspaceId: "ws-1", name: "Operations Team", slug: "operations", createdAt: SEED_PROJECT_CREATED_AT, createdBy: currentUser.id },
+  { id: "proj-sales", workspaceId: "ws-1", name: "Sales Team", slug: "sales", createdAt: SEED_PROJECT_CREATED_AT, createdBy: currentUser.id },
+  { id: "proj-product", workspaceId: "ws-1", name: "Product Team", slug: "product", createdAt: SEED_PROJECT_CREATED_AT, createdBy: currentUser.id },
 ];
 
 /** Firm name from the persisted onboarding store, so a fresh workspace is named after the firm. */
@@ -419,6 +487,28 @@ function readFirmName(): string | undefined {
 /** A clean, mock-free starting workspace (named after the firm when available). */
 function defaultWorkspaces(): Workspace[] {
   return [{ id: "ws-1", name: readFirmName() ?? "My Workspace" }];
+}
+
+// A default roster so the team chat @mention picker has real people to call,
+// like a Slack workspace. Two teammates per team project; deduped by id when
+// merged so existing data is never overwritten.
+const SEED_TEAMMATES: TeamMember[] = [
+  { id: "tm-risk-1", projectId: "proj-risk", name: "Morgan Lee", role: "Risk Analyst", email: "morgan@acme.co", avatarUrl: unsplashAvatars.morgan, status: "online" },
+  { id: "tm-risk-2", projectId: "proj-risk", name: "Priya Sharma", role: "Compliance Lead", email: "priya@acme.co", avatarUrl: unsplashAvatars.priya, status: "away" },
+  { id: "tm-marketing-1", projectId: "proj-marketing", name: "Jordan Blake", role: "Growth Marketer", email: "jordan@acme.co", avatarUrl: unsplashAvatars.jordan, status: "online" },
+  { id: "tm-marketing-2", projectId: "proj-marketing", name: "Emma Stone", role: "Content Lead", email: "emma@acme.co", avatarUrl: unsplashAvatars.emma, status: "online" },
+  { id: "tm-operations-1", projectId: "proj-operations", name: "Alex Chen", role: "Operations Manager", email: "alex@acme.co", avatarUrl: unsplashAvatars.alex, status: "busy" },
+  { id: "tm-operations-2", projectId: "proj-operations", name: "Sarah Park", role: "Support Lead", email: "sarah@acme.co", avatarUrl: unsplashAvatars.sarah, status: "online" },
+  { id: "tm-sales-1", projectId: "proj-sales", name: "Chris Taylor", role: "Account Executive", email: "chris@acme.co", avatarUrl: unsplashAvatars.chris, status: "online" },
+  { id: "tm-sales-2", projectId: "proj-sales", name: "Elena Vasquez", role: "Sales Lead", email: "elena@acme.co", avatarUrl: unsplashAvatars.elena, status: "away" },
+  { id: "tm-product-1", projectId: "proj-product", name: "Riley Quinn", role: "Product Manager", email: "riley@acme.co", status: "online" },
+  { id: "tm-product-2", projectId: "proj-product", name: "Noah Bennett", role: "Product Designer", email: "noah@acme.co", status: "away" },
+];
+
+/** Add any seed teammates that are not already present (by id). Non-destructive. */
+function mergeSeedTeammates(stored: TeamMember[]): TeamMember[] {
+  const ids = new Set(stored.map((member) => member.id));
+  return [...stored, ...SEED_TEAMMATES.filter((member) => !ids.has(member.id))];
 }
 
 function defaultProjects(): Project[] {
@@ -450,7 +540,16 @@ function hydratePersistedData(
   const projects = resetMock
     ? defaultProjects()
     : (() => {
-        const stored = data.projects ?? [];
+        const seedById = new Map(TEAM_PROJECTS.map((team) => [team.id, team]));
+        // Backfill creator metadata that predates the createdAt/createdBy fields.
+        const stored = (data.projects ?? []).map((project) => {
+          const seed = seedById.get(project.id);
+          return {
+            ...project,
+            createdAt: project.createdAt ?? seed?.createdAt,
+            createdBy: project.createdBy ?? seed?.createdBy ?? currentUser.id,
+          };
+        });
         const ids = new Set(stored.map((project) => project.id));
         const merged = [...stored, ...TEAM_PROJECTS.filter((team) => !ids.has(team.id))];
         return merged.length > 0 ? merged : defaultProjects();
@@ -493,7 +592,10 @@ function hydratePersistedData(
       validProjectIds.has(session.projectId),
     ),
     messages: shouldDropSeededChatHistory ? [] : data.messages ?? [],
-    teamMembers: (resetMock ? [] : data.teamMembers ?? []).map(enrichTeamMember),
+    teamMembers: mergeSeedTeammates(
+      (resetMock ? [] : data.teamMembers ?? []).map(enrichTeamMember),
+    ),
+    teamMessages: resetMock ? [] : data.teamMessages ?? [],
     datasets:
       Array.isArray(data.datasets) && data.datasets.every(hasDatasetShape)
         ? data.datasets
@@ -533,6 +635,9 @@ function hydratePersistedData(
     actionProposals: data.actionProposals ?? [],
     taskActivities: resetMock ? [] : data.taskActivities ?? seedTaskActivityItems,
     roadmapItems: resetMock ? [] : data.roadmapItems ?? seedRoadmapItems,
+    plans: resetMock ? [] : Array.isArray(data.plans) ? data.plans : [],
+    automations: resetMock ? [] : Array.isArray(data.automations) ? data.automations : [],
+    scheduleEntries: resetMock ? [] : Array.isArray(data.scheduleEntries) ? data.scheduleEntries : [],
     notifications: resetMock ? [] : data.notifications ?? [],
     selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
       ? data.selectedWorkRunId!
@@ -550,7 +655,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   contacts: [],
   sessions: [],
   messages: [],
-  teamMembers: [],
+  teamMembers: SEED_TEAMMATES,
+  teamMessages: [],
   datasets: [],
   agentRuns: [],
   agentMemoryNotes: [],
@@ -569,6 +675,9 @@ export const useDataStore = create<DataState>((set, get) => ({
   actionProposals: [],
   taskActivities: seedTaskActivityItems,
   roadmapItems: seedRoadmapItems,
+  plans: [],
+  automations: [],
+  scheduleEntries: [],
   notifications: [],
   selectedWorkRunId: null,
 
@@ -743,6 +852,58 @@ export const useDataStore = create<DataState>((set, get) => ({
     persistLocal(get());
   },
 
+  toggleMessageReaction: (id, emoji) => {
+    const existing = get().messages.find((message) => message.id === id);
+    const current = existing?.reactions ?? [];
+    const added = !current.includes(emoji);
+    const reactions = added
+      ? [...current, emoji]
+      : current.filter((value) => value !== emoji);
+    const messages = get().messages.map((message) =>
+      message.id === id ? { ...message, reactions } : message,
+    );
+    set({ messages });
+    persistLocal(get());
+    return { reactions, added };
+  },
+
+  getTeamMessagesByProject: (projectId) =>
+    get()
+      .teamMessages.filter((message) => message.projectId === projectId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+
+  postTeamMessage: ({ projectId, body, mentions }) => {
+    const now = new Date().toISOString();
+    const message: TeamMessage = {
+      id: generateId("teammsg"),
+      projectId,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorAvatarUrl: currentUser.avatarUrl,
+      body: body.trim(),
+      mentions,
+      createdAt: now,
+    };
+    set({ teamMessages: [...get().teamMessages, message] });
+
+    // Reflect each @mention in the inbox so the called teammate is notified.
+    // Mentions are workspace-wide, so resolve against all teammates.
+    mentions.forEach((memberId) => {
+      const member = get().teamMembers.find((m) => m.id === memberId);
+      if (!member) return;
+      get().addNotification({
+        type: "mention",
+        title: `${currentUser.name} mentioned ${member.name}`,
+        body: message.body,
+        projectId,
+        actor: currentUser.name,
+      });
+    });
+
+    persistLocal(get());
+    return message;
+  },
+
   addSession: async (projectId, title = "New session") => {
     const session: Session = {
       id: generateId("session"),
@@ -790,6 +951,217 @@ export const useDataStore = create<DataState>((set, get) => ({
     }
   },
 
+  moveSession: (sessionId, projectId) => {
+    const now = new Date().toISOString();
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, projectId, updatedAt: now }
+          : session,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  createPlan: ({ projectId, sessionId, draft }) => {
+    const now = new Date().toISOString();
+    const record: PlanRecord = {
+      id: generateId("plan"),
+      projectId,
+      sessionId,
+      title: draft.title,
+      summary: draft.summary,
+      steps: draft.steps.map((step) => ({
+        id: generateId("step"),
+        action: step.action,
+        tier: normalizePlanTier(step.tier),
+        detail: step.detail || undefined,
+        done: false,
+      })),
+      assumptions: draft.assumptions ?? [],
+      status: "draft",
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ plans: [record, ...get().plans] });
+    persistLocal(get());
+    return record;
+  },
+
+  updatePlan: (id, patch) => {
+    const now = new Date().toISOString();
+    set({
+      plans: get().plans.map((plan) =>
+        plan.id === id ? { ...plan, ...patch, updatedAt: now } : plan,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  setPlanStatus: (id, status) => {
+    const now = new Date().toISOString();
+    set({
+      plans: get().plans.map((plan) =>
+        plan.id === id ? { ...plan, status, updatedAt: now } : plan,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  buildPlanTasks: (id) => {
+    const plan = get().plans.find((item) => item.id === id);
+    if (!plan) return [];
+    // A standalone chat may not be tied to a project yet; fall back to the
+    // first available project so the board still gets the steps (instead of
+    // silently creating "0" tasks).
+    const targetProjectId = plan.projectId ?? get().projects[0]?.id;
+    if (!targetProjectId) return [];
+    const now = new Date().toISOString();
+    const nextTasks = [...get().tasks];
+    const tierPriority: Record<string, Task["priority"]> = {
+      approval: "high",
+      strict: "medium",
+      automatic: "low",
+    };
+    const created = plan.steps.map((step) => {
+      const task: Task = {
+        id: generateId("task"),
+        projectId: targetProjectId,
+        identifier: generateIdentifier(targetProjectId, nextTasks),
+        title: step.action,
+        status: "todo",
+        description: step.detail,
+        priority: tierPriority[step.tier] ?? "medium",
+        createdAt: now,
+        updatedAt: now,
+      };
+      nextTasks.push(task);
+      return task;
+    });
+
+    set({
+      tasks: nextTasks,
+      plans: get().plans.map((item) =>
+        item.id === id
+          ? { ...item, projectId: targetProjectId, status: "approved", updatedAt: now }
+          : item,
+      ),
+      taskActivities: [
+        ...created.map((task) => ({
+          id: generateId("activity"),
+          projectId: task.projectId,
+          taskId: task.id,
+          type: "task_created" as const,
+          title: `${task.identifier} created`,
+          description: `${task.title} (from plan: ${plan.title})`,
+          actor: "Agent" as const,
+          createdAt: now,
+        })),
+        ...get().taskActivities,
+      ],
+    });
+    persistLocal(get());
+    return created;
+  },
+
+  getPlan: (id) => get().plans.find((plan) => plan.id === id),
+
+  automatePlan: (id) => {
+    const plan = get().plans.find((item) => item.id === id);
+    if (!plan) return [];
+    const existing = get().automations.filter((rule) => rule.planId === id);
+    if (existing.length > 0) return existing;
+    const now = new Date().toISOString();
+    const created: AutomationRule[] = plan.steps.map((step, index) => {
+      const { name, trigger, action } = deriveAutomationFields(step, index);
+      return {
+        id: generateId("auto"),
+        planId: plan.id,
+        projectId: plan.projectId,
+        sessionId: plan.sessionId,
+        stepId: step.id,
+        name,
+        trigger,
+        action,
+        tier: step.tier,
+        status: "active" as const,
+        createdAt: now,
+      };
+    });
+    set({ automations: [...created, ...get().automations] });
+    persistLocal(get());
+    return created;
+  },
+
+  schedulePlan: (id) => {
+    const plan = get().plans.find((item) => item.id === id);
+    if (!plan) return [];
+    const existing = get().scheduleEntries.filter((entry) => entry.planId === id);
+    if (existing.length > 0) return existing;
+    const now = new Date().toISOString();
+    const automationsByStep = new Map(
+      get()
+        .automations.filter((rule) => rule.planId === id)
+        .map((rule) => [rule.stepId, rule]),
+    );
+    // Best-effort link to the board tasks created from this plan (matched by
+    // title within the plan's project) so each gets a due date.
+    const projectTasks = plan.projectId
+      ? get().tasks.filter((task) => task.projectId === plan.projectId)
+      : [];
+    const taskByTitle = new Map(projectTasks.map((task) => [task.title.trim(), task]));
+
+    const created: ScheduleEntry[] = plan.steps.map((step, index) => {
+      const startDate = deriveStartDate(index);
+      const task = taskByTitle.get(step.action.trim());
+      return {
+        id: generateId("sched"),
+        planId: plan.id,
+        projectId: plan.projectId,
+        stepId: step.id,
+        automationId: automationsByStep.get(step.id)?.id,
+        taskId: task?.id,
+        title: step.action,
+        cadence: deriveCadence(step),
+        startDate,
+        status: "scheduled" as const,
+        createdAt: now,
+      };
+    });
+
+    const dueDateByTask = new Map(
+      created
+        .filter((entry) => entry.taskId)
+        .map((entry) => [entry.taskId as string, formatScheduleDate(entry.startDate)]),
+    );
+
+    set({
+      scheduleEntries: [...created, ...get().scheduleEntries],
+      tasks: get().tasks.map((task) =>
+        dueDateByTask.has(task.id)
+          ? { ...task, dueDate: dueDateByTask.get(task.id), updatedAt: now }
+          : task,
+      ),
+    });
+    persistLocal(get());
+    return created;
+  },
+
+  setAutomationStatus: (id, status) => {
+    set({
+      automations: get().automations.map((rule) =>
+        rule.id === id ? { ...rule, status } : rule,
+      ),
+    });
+    persistLocal(get());
+  },
+
+  getAutomationsByPlan: (planId) =>
+    get().automations.filter((rule) => rule.planId === planId),
+
+  getScheduleByPlan: (planId) =>
+    get().scheduleEntries.filter((entry) => entry.planId === planId),
+
   archiveSession: (sessionId) => {
     const now = new Date().toISOString();
     set({
@@ -807,6 +1179,8 @@ export const useDataStore = create<DataState>((set, get) => ({
       workspaceId,
       name,
       slug: name.toLowerCase().replace(/\s+/g, "-"),
+      createdAt: now,
+      createdBy: currentUser.id,
     };
     set({
       projects: [...get().projects, project],
@@ -1683,6 +2057,17 @@ export const useDataStore = create<DataState>((set, get) => ({
       .teamMembers.filter((m) => m.projectId === projectId)
       .map(enrichTeamMember),
 
+  getTeamMembersByWorkspace: (workspaceId) => {
+    const projectIds = new Set(
+      get()
+        .projects.filter((project) => project.workspaceId === workspaceId)
+        .map((project) => project.id),
+    );
+    return get()
+      .teamMembers.filter((member) => projectIds.has(member.projectId))
+      .map(enrichTeamMember);
+  },
+
   getDatasetsByProject: (projectId) =>
     get().datasets.filter((dataset) => dataset.projectId === projectId),
 
@@ -1718,6 +2103,7 @@ function persistLocal(state: DataState) {
     sessions: state.sessions,
     messages: state.messages,
     teamMembers: state.teamMembers,
+    teamMessages: state.teamMessages,
     datasets: state.datasets,
     agentRuns: state.agentRuns,
     agentMemoryNotes: state.agentMemoryNotes,
@@ -1736,6 +2122,9 @@ function persistLocal(state: DataState) {
     actionProposals: state.actionProposals,
     taskActivities: state.taskActivities,
     roadmapItems: state.roadmapItems,
+    plans: state.plans,
+    automations: state.automations,
+    scheduleEntries: state.scheduleEntries,
     notifications: state.notifications,
     selectedWorkRunId: state.selectedWorkRunId,
   };

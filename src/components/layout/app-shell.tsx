@@ -6,7 +6,7 @@ import { MainWorkspace } from "@/components/workspace/main-workspace";
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
-import { SettingsSheet } from "@/components/settings/settings-sheet";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { ProfileSheet } from "@/components/profile/profile-sheet";
 import {
   ResizableHandle,
@@ -152,7 +152,7 @@ export function AppShell() {
       ) : null}
       <CommandPalette />
       <ShortcutsDialog />
-      <SettingsSheet />
+      <SettingsDialog />
       <ProfileSheet />
     </div>
   );

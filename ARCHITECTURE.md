@@ -84,7 +84,7 @@ others are populated *from* chat.
   `ARTIFACT_SCHEMA_VERSION`, `defaultProjects` = the team template). Migration is **non-destructive**
   for schema ≥7 (keeps the user's projects/chats, just adds the team projects).
 - **selection-store** — current workspace/project/session/contextChips (not persisted).
-- **shell-store** — UI: activeView, sidebarMode (`projects` | `inbox`), panel sizes, open dialogs
+- **shell-store** — UI: activeView, sidebarMode (`chat` | `inbox` | `projects`), panel sizes, open dialogs
   (persisted as `crm-shell`).
 - **chat-store** — composer text, mode (Plan/Auto), and **attachments**.
 - **auth-store** — model/provider connection status (from `/api/auth/status`).

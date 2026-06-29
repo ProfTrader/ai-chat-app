@@ -4,6 +4,7 @@ import {
   resolveMoonshotBaseUrl,
   resolveMoonshotApiKey,
   resolveMoonshotModel,
+  resolveMoonshotModelForInput,
   validateMoonshotApiKey,
 } from "../lib/auth.js";
 import { chatContextSchema, extractLatestUserMessage } from "../lib/context.js";
@@ -93,7 +94,7 @@ chat.post("/", async (c) => {
   const model = useOllama
     ? resolveOllamaModel(body.model)
     : moonshotApiKey
-    ? resolveMoonshotModel(body.model)
+    ? resolveMoonshotModelForInput(userMessage, body.model)
     : body.model ?? process.env.CURSOR_MODEL ?? "composer-2.5";
 
   try {

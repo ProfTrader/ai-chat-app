@@ -12,6 +12,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       defaultTheme="dark"
       enableSystem
       enableColorScheme
+      themes={["light", "dark", "studio-light", "slack", "lavender"]}
       storageKey="crm-theme"
       disableTransitionOnChange
     >

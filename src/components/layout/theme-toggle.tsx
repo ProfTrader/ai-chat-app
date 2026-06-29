@@ -1,5 +1,5 @@
 import { useTheme } from "next-themes";
-import { Moon, Sun, Monitor } from "lucide-react";
+import { Moon, Sun, Monitor, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -34,6 +34,18 @@ export function ThemeToggle() {
         <DropdownMenuItem onClick={() => setTheme("dark")}>
           <Moon data-icon="inline-start" />
           Dark
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("studio-light")}>
+          <Sun data-icon="inline-start" />
+          Studio Light
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("slack")}>
+          <Hash data-icon="inline-start" />
+          Aubergine
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("lavender")}>
+          <Hash data-icon="inline-start" />
+          Lavender
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setTheme("system")}>
           <Monitor data-icon="inline-start" />

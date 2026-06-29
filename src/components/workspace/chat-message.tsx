@@ -2,7 +2,7 @@ import { ArrowUpRight, Check, Copy, FileText, ImageIcon } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
 import {
   Attachment,
@@ -18,11 +18,22 @@ import { TaskProposalArtifact } from "@/components/workspace/task-proposal-artif
 import { InteractiveQuestions } from "@/components/workspace/interactive-questions";
 import { DocArtifact } from "@/components/workspace/doc-artifact";
 import { DeliveryChoice } from "@/components/workspace/delivery-choice";
+import { PlanArtifact } from "@/components/workspace/plan-artifact";
+import { AutomationArtifact } from "@/components/workspace/automation-artifact";
+import { ScheduleArtifact } from "@/components/workspace/schedule-artifact";
+import { DeliverablesArtifact } from "@/components/workspace/deliverables-artifact";
 import { parseMessageAttachments, formatBytes } from "@/lib/chat/attachments";
 import { parseEmailMarker } from "@/lib/email/client";
 import { parseTasksMarker } from "@/lib/tasks/client";
 import { parseClarifyMarker } from "@/lib/clarify/client";
 import { parseDocMarker, parseDeliveryMarker } from "@/lib/docs/client";
+import { parsePlanMarker, stripPlanMarkers } from "@/lib/plan/client";
+import {
+  parseAutomationMarker,
+  parseScheduleMarker,
+  parseDeliverablesMarker,
+  stripAutomationMarkers,
+} from "@/lib/automation/client";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import {
   Message,
@@ -31,10 +42,56 @@ import {
   MessageFooter,
 } from "@/components/ui/message";
 import { Spinner } from "@/components/ui/spinner";
+import { PersonAvatar } from "@/components/ui/person-avatar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useDataStore } from "@/stores/data-store";
 import { useShellStore } from "@/stores/shell-store";
+import { useChatSession } from "@/lib/chat/chat-session-provider";
+import { CHAT_REACTIONS } from "@/lib/chat/reactions";
+import { currentUser } from "@/lib/current-user";
+import dexterAvatar from "@/assets/dexter-avatar.png";
+
+const NO_REACTIONS: string[] = [];
+
+function ReactionBar({
+  reactions,
+  onToggle,
+}: {
+  reactions: string[];
+  onToggle: (emoji: string) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-0.5"
+      role="group"
+      aria-label="React to this response"
+    >
+      {CHAT_REACTIONS.map((reaction) => {
+        const active = reactions.includes(reaction.emoji);
+        return (
+          <button
+            key={reaction.id}
+            type="button"
+            onClick={() => onToggle(reaction.emoji)}
+            aria-label={reaction.aria}
+            aria-pressed={active}
+            title={reaction.meaning}
+            className={cn(
+              "flex h-6 items-center rounded-full border px-1.5 text-sm leading-none transition-all",
+              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active
+                ? "border-active/40 bg-active-soft opacity-100"
+                : "border-transparent opacity-0 hover:bg-muted group-hover/message:opacity-100",
+            )}
+          >
+            <span aria-hidden="true">{reaction.emoji}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function getMessageText(message: UIMessage) {
   return message.parts
@@ -69,8 +126,8 @@ function renderMarkdown(content: string, key: string) {
     <div
       key={key}
       className={cn(
-        "prose prose-sm max-w-none text-foreground",
-        "[&_a]:text-active [&_a]:underline-offset-4",
+        "prose prose-sm max-w-none text-current",
+        "[&_a]:underline [&_a]:underline-offset-4",
         "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
         "[&_h1]:mb-2 [&_h1]:mt-1 [&_h1]:text-base [&_h1]:font-semibold",
         "[&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold",
@@ -177,9 +234,16 @@ export function ChatMessage({
   const { cleanText: textWithoutAsk } = parseClarifyMarker(textWithoutTasks);
   const { cleanText: textWithoutDoc } = parseDocMarker(textWithoutAsk);
   const { cleanText: textWithoutDeliver } = parseDeliveryMarker(textWithoutDoc);
-  const { runId, cleanText } = parseViewBriefMarker(textWithoutDeliver);
+  const textWithoutPlan = stripPlanMarkers(textWithoutDeliver);
+  const textWithoutPipeline = stripAutomationMarkers(textWithoutPlan);
+  const { runId, cleanText } = parseViewBriefMarker(textWithoutPipeline);
   const selectWorkRun = useDataStore((state) => state.selectWorkRun);
   const setActiveView = useShellStore((state) => state.setActiveView);
+  const { reactToMessage } = useChatSession();
+  const reactions =
+    useDataStore(
+      (state) => state.messages.find((m) => m.id === message.id)?.reactions,
+    ) ?? NO_REACTIONS;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(cleanText);
@@ -194,13 +258,24 @@ export function ChatMessage({
 
   return (
     <Message align={isUser ? "end" : "start"}>
-      <MessageAvatar className="bg-transparent">
-        <Avatar size="sm" className={isUser ? "bg-muted" : "bg-primary/10"}>
-          <AvatarFallback className={cn(isUser ? "bg-muted" : "bg-primary/10 text-active")}>
-            {isUser ? "ME" : "DX"}
-          </AvatarFallback>
-        </Avatar>
-      </MessageAvatar>
+      {isUser ? (
+        <MessageAvatar className="bg-transparent">
+          <PersonAvatar
+            name={currentUser.name}
+            avatarUrl={currentUser.avatarUrl}
+            size="sm"
+            imageSize={64}
+            alt="Your avatar"
+          />
+        </MessageAvatar>
+      ) : (
+        <MessageAvatar className="bg-transparent">
+          <Avatar size="sm" className="bg-primary/10">
+            <AvatarImage src={dexterAvatar} alt="Dexter avatar" />
+            <AvatarFallback className="bg-primary/10 text-active">DX</AvatarFallback>
+          </Avatar>
+        </MessageAvatar>
+      )}
       <MessageContent
         className={cn(
           "max-w-[min(42rem,calc(100%-2.5rem))]",
@@ -227,9 +302,9 @@ export function ChatMessage({
               </AttachmentGroup>
             )}
             {cleanText && (
-              <Bubble align="end" variant="default" className="max-w-[min(34rem,82%)]">
+              <Bubble align="end" variant="default" className="max-w-[min(34rem,88%)]">
                 <BubbleContent
-                  className="rounded-2xl px-4 py-2.5 text-left shadow-sm"
+                  className="min-w-11 rounded-[18px] bg-chat-user-bubble! px-3.5 py-2 text-left text-chat-user-foreground! shadow-sm"
                   style={{ overflowWrap: "normal", wordBreak: "normal" }}
                 >
                   {cleanText}
@@ -251,22 +326,36 @@ export function ChatMessage({
                 parseDocMarker(textWithoutAskPart);
               const { payload: deliveryPayload, cleanText: textWithoutDeliverPart } =
                 parseDeliveryMarker(textWithoutDocPart);
-              const partText = parseViewBriefMarker(textWithoutDeliverPart).cleanText;
+              const { planId, cleanText: textWithoutPlanRef } =
+                parsePlanMarker(textWithoutDeliverPart);
+              const { planId: automationPlanId, cleanText: textWithoutAutomation } =
+                parseAutomationMarker(textWithoutPlanRef);
+              const { planId: schedulePlanId, cleanText: textWithoutSchedule } =
+                parseScheduleMarker(textWithoutAutomation);
+              const { planId: deliverablesPlanId, cleanText: textWithoutDeliverables } =
+                parseDeliverablesMarker(textWithoutSchedule);
+              const partText = parseViewBriefMarker(
+                stripPlanMarkers(textWithoutDeliverables),
+              ).cleanText;
               if (
                 !partText &&
                 !email &&
                 !proposedTasks &&
                 !clarifyPayload &&
                 !docPayload &&
-                !deliveryPayload
+                !deliveryPayload &&
+                !planId &&
+                !automationPlanId &&
+                !schedulePlanId &&
+                !deliverablesPlanId
               )
                 return null;
 
               return (
                 <div key={`${part.type}-${index}`} className="flex flex-col gap-2">
                   {partText && (
-                    <Bubble variant="muted" className="max-w-[min(38rem,86%)]">
-                      <BubbleContent className="flex flex-col gap-2.5 rounded-2xl border border-border/70 px-4 py-3 text-foreground shadow-sm">
+                    <Bubble variant="muted" className="max-w-[min(38rem,90%)]">
+                      <BubbleContent className="flex flex-col gap-2.5 rounded-[18px] border border-chat-agent-border! bg-chat-agent-bubble! px-4 py-3 text-chat-agent-foreground! shadow-sm">
                         <ProductionStream content={partText} isStreaming={isStreaming} />
                       </BubbleContent>
                     </Bubble>
@@ -278,6 +367,10 @@ export function ChatMessage({
                   {clarifyPayload && <InteractiveQuestions payload={clarifyPayload} />}
                   {docPayload && <DocArtifact payload={docPayload} />}
                   {deliveryPayload && <DeliveryChoice payload={deliveryPayload} />}
+                  {planId && <PlanArtifact planId={planId} />}
+                  {automationPlanId && <AutomationArtifact planId={automationPlanId} />}
+                  {schedulePlanId && <ScheduleArtifact planId={schedulePlanId} />}
+                  {deliverablesPlanId && <DeliverablesArtifact planId={deliverablesPlanId} />}
                 </div>
               );
             })}
@@ -294,6 +387,12 @@ export function ChatMessage({
                 View on canvas
                 <ArrowUpRight data-icon="inline-end" />
               </Button>
+            ) : null}
+            {cleanText && !isStreaming ? (
+              <ReactionBar
+                reactions={reactions}
+                onToggle={(emoji) => reactToMessage(message, emoji)}
+              />
             ) : null}
             {cleanText ? (
               <Button

@@ -34,3 +34,6 @@ server/.env
 
 # Local Claude Code settings (machine-specific, may hold local overrides)
 .claude/settings.local.json
+
+# Local browser automation scratch output
+.playwright-cli/

@@ -11,6 +11,7 @@ import { onboarding } from "./routes/onboarding.js";
 import { email } from "./routes/email.js";
 import { tasks } from "./routes/tasks.js";
 import { clarify } from "./routes/clarify.js";
+import { plan } from "./routes/plan.js";
 
 config();
 config({ path: "server/.env", override: false });
@@ -36,6 +37,7 @@ app.route("/api/onboarding", onboarding);
 app.route("/api/email", email);
 app.route("/api/tasks", tasks);
 app.route("/api/clarify", clarify);
+app.route("/api/plan", plan);
 
 const port = Number(process.env.PORT ?? 3001);
 

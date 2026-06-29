@@ -87,7 +87,8 @@ export function MainWorkspace() {
     activeView === "chat" && sidebarMode === "inbox"
       ? "Inbox"
       : projectScoped
-        ? project?.name ?? "Project"
+        ? project?.name ??
+          (activeView === "chat" ? session?.title ?? "Unassigned chat" : "Project")
         : activeMeta.label;
   const workspaceSubtitle =
     activeView === "chat" && sidebarMode === "inbox"

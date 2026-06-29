@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ViewType } from "@/types";
 
-export type SidebarMode = "inbox" | "projects";
+export type SidebarMode = "chat" | "inbox" | "projects";
 
 const NAV_PANEL_DEFAULT = 33;
 const INSPECTOR_PANEL_DEFAULT = 30;

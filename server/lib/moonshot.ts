@@ -5,6 +5,7 @@ interface MoonshotChunk {
   choices?: Array<{
     delta?: {
       content?: string;
+      reasoning_content?: string;
     };
     message?: {
       content?: string | Array<{ text?: string; content?: string; type?: string }>;
@@ -19,6 +20,37 @@ interface MoonshotChunk {
   }>;
   error?: {
     message?: string;
+  };
+}
+
+function isKimiThinkingModel(model: string) {
+  return model.startsWith("kimi-k2.7") || model.startsWith("kimi-k2.6");
+}
+
+function buildMoonshotRequestBody({
+  model,
+  stream,
+  messages,
+  temperature,
+  maxTokens,
+}: {
+  model: string;
+  stream: boolean;
+  messages: Array<{ role: "system" | "user"; content: string }>;
+  temperature?: number;
+  maxTokens?: number;
+}) {
+  const thinkingModel = isKimiThinkingModel(model);
+  return {
+    model,
+    stream,
+    ...(thinkingModel
+      ? { max_tokens: maxTokens ?? 32768 }
+      : {
+          temperature: temperature ?? 0.2,
+          max_completion_tokens: maxTokens ?? 2200,
+        }),
+    messages,
   };
 }
 
@@ -52,7 +84,84 @@ function extractMoonshotCompletionContent(data: MoonshotChunk): string {
     extractTextContent(data.output_text) ||
     outputContent ||
     extractTextContent(choice?.message?.reasoning_content)
-  ).trim();
+  );
+}
+
+function findBalancedJsonObject(content: string) {
+  const start = content.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) return content.slice(start, index + 1);
+  }
+  return null;
+}
+
+function parseMoonshotJsonObject(text: string) {
+  try {
+    return JSON.parse(text) as MoonshotChunk;
+  } catch {
+    const json = findBalancedJsonObject(text);
+    if (!json) throw new Error(text || "Moonshot returned an invalid JSON response.");
+    return JSON.parse(json) as MoonshotChunk;
+  }
+}
+
+function parseMoonshotCompletionBody(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("Moonshot returned an empty response.");
+
+  if (trimmed.includes("\ndata:") || trimmed.startsWith("data:")) {
+    let content = "";
+    for (const rawLine of trimmed.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      const parsed = parseMoonshotJsonObject(payload);
+      if (parsed.error?.message) throw new Error(parsed.error.message);
+      content += extractMoonshotCompletionContent(parsed);
+    }
+    if (content.trim()) return content.trim();
+  }
+
+  const jsonLines = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("{") && line.endsWith("}"));
+  if (jsonLines.length > 1) {
+    let content = "";
+    for (const line of jsonLines) {
+      const parsed = parseMoonshotJsonObject(line);
+      if (parsed.error?.message) throw new Error(parsed.error.message);
+      content += extractMoonshotCompletionContent(parsed);
+    }
+    if (content.trim()) return content.trim();
+  }
+
+  const data = parseMoonshotJsonObject(trimmed);
+  if (data.error?.message) throw new Error(data.error.message);
+  const content = extractMoonshotCompletionContent(data);
+  if (!content) throw new Error("Moonshot did not return a message.");
+  return content;
 }
 
 export async function listMoonshotModels(apiKey: string, baseUrl: string) {
@@ -83,13 +192,15 @@ export async function createMoonshotChatStream(options: {
 }) {
   const { createUIMessageStream, generateId } = await import("ai");
   const systemPrompt = buildSystemPrompt(options.context);
-  // The kimi-k2 series (k2.5 / k2.6 / k2.7*) only accepts temperature 1.
-  const isReasoningModel = options.model.startsWith("kimi-k2");
-  const temperature = isReasoningModel ? 1 : 0.2;
-  // kimi-k2 reasons before answering, and reasoning tokens count against this
-  // budget. A small cap (e.g. 1200) gets fully consumed by reasoning, leaving
-  // the answer truncated or empty. Give reasoning models plenty of headroom.
-  const maxCompletionTokens = isReasoningModel ? 8192 : 1200;
+  const requestBody = buildMoonshotRequestBody({
+    model: options.model,
+    stream: true,
+    maxTokens: isKimiThinkingModel(options.model) ? 32768 : 1200,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: options.userMessage },
+    ],
+  });
 
   return createUIMessageStream({
     execute: async ({ writer }) => {
@@ -137,16 +248,7 @@ export async function createMoonshotChatStream(options: {
           Authorization: `Bearer ${options.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: options.model,
-          stream: true,
-          temperature,
-          max_completion_tokens: maxCompletionTokens,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: options.userMessage },
-          ],
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok || !response.body) {
@@ -206,23 +308,24 @@ export async function createMoonshotChatCompletion(options: {
   temperature?: number;
   maxTokens?: number;
 }) {
+  const requestBody = buildMoonshotRequestBody({
+    model: options.model,
+    stream: false,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    messages: [
+      { role: "system", content: options.system },
+      { role: "user", content: options.user },
+    ],
+  });
+
   const response = await fetch(`${options.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: options.model,
-      stream: false,
-      temperature: options.temperature ?? (options.model.startsWith("kimi-k2") ? 1 : 0.2),
-      max_completion_tokens:
-        options.maxTokens ?? (options.model.startsWith("kimi-k2") ? 8192 : 2200),
-      messages: [
-        { role: "system", content: options.system },
-        { role: "user", content: options.user },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -230,9 +333,5 @@ export async function createMoonshotChatCompletion(options: {
     throw new Error(details || `Moonshot request failed with status ${response.status}`);
   }
 
-  const data = (await response.json()) as MoonshotChunk;
-  const content = extractMoonshotCompletionContent(data);
-  if (data.error?.message) throw new Error(data.error.message);
-  if (!content) throw new Error("Moonshot did not return a message.");
-  return content;
+  return parseMoonshotCompletionBody(await response.text());
 }
