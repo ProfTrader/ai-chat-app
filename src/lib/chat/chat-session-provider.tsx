@@ -712,6 +712,7 @@ export function ChatSessionProvider({
     contacts,
     teamMembers,
     agentMemories,
+    researchDocs,
     getTasksByProject,
   } = useDataStore();
   const pendingArtifactPlans = useDataStore((s) => s.pendingArtifactPlans);
@@ -826,6 +827,18 @@ export function ChatSessionProvider({
                     confidence: memory.confidence,
                   }))
               : [],
+            researchSummary: projectId
+              ? researchDocs
+                  .filter((doc) => doc.projectId === projectId)
+                  .slice(0, 20)
+                  .map((doc) => ({
+                    kind: doc.kind,
+                    entity: doc.entity,
+                    title: doc.title,
+                    summary: doc.summary,
+                    sourceUrl: doc.sourceUrl,
+                  }))
+              : [],
             recentMessages: sessionId
               ? getMessagesBySession(sessionId)
                   .slice(-8)
@@ -862,6 +875,7 @@ export function ChatSessionProvider({
       project?.name,
       project?.slug,
       projectId,
+      researchDocs,
       sessionId,
       teamMembers,
       workspace?.name,

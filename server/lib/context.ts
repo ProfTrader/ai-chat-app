@@ -70,6 +70,17 @@ export const chatContextSchema = z.object({
       }),
     )
     .default([]),
+  researchSummary: z
+    .array(
+      z.object({
+        kind: z.string(),
+        entity: z.string(),
+        title: z.string(),
+        summary: z.string(),
+        sourceUrl: z.string().optional(),
+      }),
+    )
+    .default([]),
   recentMessages: z
     .array(
       z.object({
@@ -114,6 +125,7 @@ export function summarizeContextForActivity(context: ChatContext) {
     `${context.datasetsSummary.length} datasets`,
     `${rowCount.toLocaleString()} rows`,
     `${context.memoriesSummary.length} memories`,
+    `${context.researchSummary.length} research docs`,
     `${context.contextChips.length} chips`,
   ].join(", ");
 }
@@ -184,6 +196,16 @@ export function buildSystemPrompt(context: ChatContext): string {
           )
           .join("\n")
       : "No durable project memories provided.";
+
+  const research =
+    context.researchSummary.length > 0
+      ? context.researchSummary
+          .map(
+            (doc) =>
+              `- [${doc.kind}/${doc.entity}] ${doc.title} — ${truncate(doc.summary, 280)}${doc.sourceUrl ? ` (src: ${doc.sourceUrl})` : ""}`,
+          )
+          .join("\n")
+      : "No firm research provided.";
 
   const recentMessages =
     context.recentMessages.length > 0
@@ -280,6 +302,9 @@ ${datasets}
 Project memory:
 ${memories}
 
+Firm research (competitive, product, support/tech, and help-desk intel gathered from the web — treat as evidence, cite the entity/source when you use it):
+${research}
+
 Recent conversation:
 ${recentMessages}
 
@@ -297,6 +322,7 @@ Behavior:
 - If the request is ambiguous, ask at most one focused clarifying question. If a reasonable default is safe, take it and say the assumption.
 - Keep the personality consistent across short replies, brief planning, and longer analysis. Warmth should not dilute accuracy or governance.
 - Ground answers in the project database snapshot first.
+- When the question touches a competitor, product, pricing, platform/tech setup, or support/help-desk topic, draw on the FIRM RESEARCH above and cite the specific entity (and source URL when present). Do not invent figures that contradict it; if the research does not cover something, say so.
 - Reuse durable project memory when it is relevant, especially explicit user preferences.
 - If evidence is missing, say what is missing instead of inventing facts.
 - When the user asks for analysis, briefly state what you inspected before recommendations.

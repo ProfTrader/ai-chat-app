@@ -84,6 +84,7 @@ chat.post("/", async (c) => {
     teamSummary: body.teamSummary,
     datasetsSummary: body.datasetsSummary,
     memoriesSummary: body.memoriesSummary,
+    researchSummary: body.researchSummary,
     recentMessages: body.recentMessages,
     businessProfile: body.businessProfile,
     firmMemory: firmRecord ? firmProfileToPromptBlock(firmRecord) : undefined,
