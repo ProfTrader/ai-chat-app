@@ -3,10 +3,12 @@ import type {
   Contact,
   Message,
   Project,
+  ResearchDoc,
   Session,
   Task,
   Workspace,
 } from "@/types";
+import { tradeifyResearchDocs } from "@/lib/research/tradeify-seed";
 
 const DB_URL = "sqlite:crm.db";
 
@@ -86,6 +88,23 @@ export async function initDatabase() {
       created_at TEXT NOT NULL
     )
   `);
+
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS research_docs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_url TEXT,
+      source TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
 }
 
 export async function seedDatabase() {
@@ -100,6 +119,38 @@ export async function seedDatabase() {
     "INSERT OR IGNORE INTO projects (id, workspace_id, name, slug) VALUES ($1, $2, $3, $4)",
     ["proj-1", "ws-1", "General", "general"],
   );
+
+  // Seed the Tradeify research corpus (idempotent via INSERT OR IGNORE).
+  await bulkInsertResearchDocs(tradeifyResearchDocs);
+}
+
+export async function insertResearchDoc(doc: ResearchDoc) {
+  const database = await getDb();
+  await database.execute(
+    `INSERT OR IGNORE INTO research_docs
+      (id, project_id, kind, entity, title, summary, content, source_url, source, tags, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [
+      doc.id,
+      doc.projectId,
+      doc.kind,
+      doc.entity,
+      doc.title,
+      doc.summary,
+      doc.content,
+      doc.sourceUrl ?? null,
+      doc.source ?? null,
+      JSON.stringify(doc.tags ?? []),
+      doc.createdAt,
+      doc.updatedAt,
+    ],
+  );
+}
+
+export async function bulkInsertResearchDocs(docs: ResearchDoc[]) {
+  for (const doc of docs) {
+    await insertResearchDoc(doc);
+  }
 }
 
 export async function insertMessage(message: Message) {
@@ -145,6 +196,7 @@ export async function loadAllData(): Promise<{
   contacts: Contact[];
   sessions: Session[];
   messages: Message[];
+  researchDocs: ResearchDoc[];
 }> {
   const database = await getDb();
 
@@ -205,6 +257,23 @@ export async function loadAllData(): Promise<{
     }[]
   >("SELECT * FROM messages ORDER BY created_at ASC");
 
+  const researchRows = await database.select<
+    {
+      id: string;
+      project_id: string;
+      kind: string;
+      entity: string;
+      title: string;
+      summary: string;
+      content: string;
+      source_url: string | null;
+      source: string | null;
+      tags: string | null;
+      created_at: string;
+      updated_at: string;
+    }[]
+  >("SELECT * FROM research_docs ORDER BY kind ASC, entity ASC");
+
   return {
     workspaces,
     projects: projectRows.map((p) => ({
@@ -250,5 +319,29 @@ export async function loadAllData(): Promise<{
       content: m.content,
       createdAt: m.created_at,
     })),
+    researchDocs: researchRows.map((r) => ({
+      id: r.id,
+      projectId: r.project_id,
+      kind: r.kind as ResearchDoc["kind"],
+      entity: r.entity,
+      title: r.title,
+      summary: r.summary,
+      content: r.content,
+      sourceUrl: r.source_url ?? undefined,
+      source: r.source ?? undefined,
+      tags: parseTags(r.tags),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    })),
   };
+}
+
+function parseTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }

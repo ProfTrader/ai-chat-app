@@ -28,6 +28,7 @@ import type {
   PermissionGrant,
   Project,
   ProjectDataset,
+  ResearchDoc,
   RoadmapItem,
   Session,
   Task,
@@ -79,6 +80,7 @@ import {
   loadBrowserData,
   saveBrowserData,
 } from "@/lib/browser-db";
+import { tradeifyResearchDocs } from "@/lib/research/tradeify-seed";
 import {
   applyLocalModelBrief,
   generateBriefWithLocalModel,
@@ -107,6 +109,7 @@ interface DataState {
   contacts: Contact[];
   sessions: Session[];
   messages: Message[];
+  researchDocs: ResearchDoc[];
   teamMembers: TeamMember[];
   teamMessages: TeamMessage[];
   datasets: ProjectDataset[];
@@ -310,6 +313,7 @@ type PersistedDataPayload = {
   contacts?: Contact[];
   sessions?: Session[];
   messages?: Message[];
+  researchDocs?: ResearchDoc[];
   teamMembers?: TeamMember[];
   teamMessages?: TeamMessage[];
   datasets?: ProjectDataset[];
@@ -592,6 +596,10 @@ function hydratePersistedData(
       validProjectIds.has(session.projectId),
     ),
     messages: shouldDropSeededChatHistory ? [] : data.messages ?? [],
+    researchDocs:
+      Array.isArray(data.researchDocs) && data.researchDocs.length > 0
+        ? data.researchDocs
+        : tradeifyResearchDocs,
     teamMembers: mergeSeedTeammates(
       (resetMock ? [] : data.teamMembers ?? []).map(enrichTeamMember),
     ),
@@ -655,6 +663,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   contacts: [],
   sessions: [],
   messages: [],
+  researchDocs: tradeifyResearchDocs,
   teamMembers: SEED_TEAMMATES,
   teamMessages: [],
   datasets: [],
@@ -687,9 +696,16 @@ export const useDataStore = create<DataState>((set, get) => ({
     const tauri = await isTauriRuntime();
     if (tauri) {
       try {
-        const { initDatabase, loadAllData } = await import("@/lib/db");
+        const { initDatabase, loadAllData, bulkInsertResearchDocs } =
+          await import("@/lib/db");
         await initDatabase();
-        const data = await loadAllData();
+        let data = await loadAllData();
+        // Ensure the research corpus is present even for DBs created before the
+        // research_docs table existed (seedDatabase only runs on a fresh DB).
+        if (data.researchDocs.length === 0) {
+          await bulkInsertResearchDocs(tradeifyResearchDocs);
+          data = await loadAllData();
+        }
         if (data.tasks.length > 0) {
           set({ ...data, storageBackend: "sqlite", initialized: true });
           return;
@@ -2102,6 +2118,7 @@ function persistLocal(state: DataState) {
     contacts: state.contacts,
     sessions: state.sessions,
     messages: state.messages,
+    researchDocs: state.researchDocs,
     teamMembers: state.teamMembers,
     teamMessages: state.teamMessages,
     datasets: state.datasets,

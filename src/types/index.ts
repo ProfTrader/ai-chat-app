@@ -81,6 +81,37 @@ export interface Contact {
   status?: PresenceStatus;
 }
 
+/** The category a piece of external research belongs to. */
+export type ResearchKind =
+  | "competitor"
+  | "product"
+  | "support_tech"
+  | "help_desk";
+
+/**
+ * A single researched document about a firm or its competitors — gathered from
+ * the web (e.g. via the Exa MCP) and ingested into the app DB so the agent can
+ * carry it as operating memory.
+ */
+export interface ResearchDoc {
+  id: string;
+  projectId: string;
+  kind: ResearchKind;
+  /** Who the doc is about — e.g. "Tradeify" or a competitor name. */
+  entity: string;
+  title: string;
+  /** One-paragraph digest, prompt-ready. */
+  summary: string;
+  /** Full findings as markdown. */
+  content: string;
+  sourceUrl?: string;
+  /** Where the research came from, e.g. "exa". */
+  source?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Session {
   id: string;
   projectId: string;
