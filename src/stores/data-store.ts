@@ -572,6 +572,26 @@ function defaultProjects(): Project[] {
   return TEAM_PROJECTS.map((project) => ({ ...project }));
 }
 
+/**
+ * Re-home research docs whose projectId no longer matches a real project. Early
+ * seeds tagged the Tradeify corpus with a stale "proj-1" id that doesn't exist
+ * in the current TEAM_PROJECTS, which made the per-project research filter in
+ * the chat agent drop every doc. Orphaned docs are reassigned to the Risk Team
+ * (the corpus's intended home), falling back to the first available project.
+ */
+function normalizeResearchProjects(
+  docs: ResearchDoc[],
+  validProjectIds: Set<string>,
+): ResearchDoc[] {
+  const home = validProjectIds.has("proj-risk")
+    ? "proj-risk"
+    : validProjectIds.values().next().value;
+  if (!home) return docs;
+  return docs.map((doc) =>
+    validProjectIds.has(doc.projectId) ? doc : { ...doc, projectId: home },
+  );
+}
+
 function hydratePersistedData(
   data: PersistedDataPayload,
   storageBackend: StorageBackend,
@@ -649,10 +669,12 @@ function hydratePersistedData(
       validProjectIds.has(session.projectId),
     ),
     messages: shouldDropSeededChatHistory ? [] : data.messages ?? [],
-    researchDocs:
+    researchDocs: normalizeResearchProjects(
       Array.isArray(data.researchDocs) && data.researchDocs.length > 0
         ? data.researchDocs
         : tradeifyResearchDocs,
+      validProjectIds,
+    ),
     teamMembers: mergeSeedTeammates(
       (resetMock ? [] : data.teamMembers ?? []).map(enrichTeamMember),
     ),
@@ -766,7 +788,18 @@ export const useDataStore = create<DataState>((set, get) => ({
           data = await loadAllData();
         }
         if (data.tasks.length > 0) {
-          set({ ...data, storageBackend: "sqlite", initialized: true });
+          const validProjectIds = new Set(
+            (data.projects ?? []).map((p) => p.id),
+          );
+          set({
+            ...data,
+            researchDocs: normalizeResearchProjects(
+              data.researchDocs,
+              validProjectIds,
+            ),
+            storageBackend: "sqlite",
+            initialized: true,
+          });
           return;
         }
         const { seedDatabase } = await import("@/lib/db");

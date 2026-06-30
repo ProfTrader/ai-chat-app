@@ -10,7 +10,11 @@ import type { ResearchDoc } from "@/types";
  * Center and site plus third-party review/comparison sites.
  */
 
-const PROJECT_ID = "proj-1";
+// The competitive/product/support corpus lives with the Risk Team, who run the
+// drawdown and breach-policy comparisons against the client (Tradeify). This id
+// must match a real seeded project (see TEAM_PROJECTS in data-store.ts) or the
+// per-project research filter in chat-session-provider drops every doc.
+const PROJECT_ID = "proj-risk";
 const INGESTED_AT = "2026-06-30T00:00:00.000Z";
 
 type SeedInput = Omit<
