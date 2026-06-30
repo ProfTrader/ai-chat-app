@@ -33,12 +33,14 @@ function buildMoonshotRequestBody({
   messages,
   temperature,
   maxTokens,
+  jsonMode,
 }: {
   model: string;
   stream: boolean;
   messages: Array<{ role: "system" | "user"; content: string }>;
   temperature?: number;
   maxTokens?: number;
+  jsonMode?: boolean;
 }) {
   const thinkingModel = isKimiThinkingModel(model);
   return {
@@ -50,6 +52,9 @@ function buildMoonshotRequestBody({
           temperature: temperature ?? 0.2,
           max_completion_tokens: maxTokens ?? 2200,
         }),
+    // OpenAI-compatible JSON mode — forces a parseable object for strict-JSON
+    // routes so the model can't drift into prose.
+    ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
     messages,
   };
 }
@@ -307,12 +312,14 @@ export async function createMoonshotChatCompletion(options: {
   user: string;
   temperature?: number;
   maxTokens?: number;
+  jsonMode?: boolean;
 }) {
   const requestBody = buildMoonshotRequestBody({
     model: options.model,
     stream: false,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    jsonMode: options.jsonMode,
     messages: [
       { role: "system", content: options.system },
       { role: "user", content: options.user },

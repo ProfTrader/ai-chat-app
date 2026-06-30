@@ -5,6 +5,7 @@ export const currentUser: UserProfile = {
   id: "user-1",
   name: "Sudharshan Ramanathan",
   role: "Product Lead",
+  altitude: "exec",
   email: "sudharshan@acme.co",
   workspace: "Acme Corp",
   bio: "Building Nexus CRM and coordinating the Q2 launch across design, engineering, and marketing.",

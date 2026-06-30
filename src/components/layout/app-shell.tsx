@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
@@ -15,6 +15,14 @@ import {
 } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { useShellStore } from "@/stores/shell-store";
+
+const MemoNavSidebar = memo(NavSidebar);
+const MemoMainWorkspace = memo(MainWorkspace);
+const MemoInspectorPanel = memo(InspectorPanel);
+const MemoCommandPalette = memo(CommandPalette);
+const MemoShortcutsDialog = memo(ShortcutsDialog);
+const MemoSettingsDialog = memo(SettingsDialog);
+const MemoProfileSheet = memo(ProfileSheet);
 
 export function AppShell() {
   const {
@@ -89,7 +97,7 @@ export function AppShell() {
             aria-hidden={navCollapsed}
             className="h-full min-h-0 min-w-0 overflow-hidden border-r border-border bg-pane"
           >
-            <NavSidebar />
+            <MemoNavSidebar />
           </section>
         </ResizablePanel>
 
@@ -97,7 +105,7 @@ export function AppShell() {
 
         <ResizablePanel id="workspace" minSize="30%" className="min-h-0 min-w-0">
           <section aria-label="Workspace" className="h-full min-h-0 min-w-0 overflow-hidden bg-pane">
-            <MainWorkspace />
+            <MemoMainWorkspace />
           </section>
         </ResizablePanel>
 
@@ -120,7 +128,7 @@ export function AppShell() {
                 aria-hidden={inspectorCollapsed}
                 className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-pane"
               >
-                <InspectorPanel />
+                <MemoInspectorPanel />
               </section>
             </ResizablePanel>
           </>
@@ -150,10 +158,10 @@ export function AppShell() {
           <ChevronLeft />
         </Button>
       ) : null}
-      <CommandPalette />
-      <ShortcutsDialog />
-      <SettingsDialog />
-      <ProfileSheet />
+      <MemoCommandPalette />
+      <MemoShortcutsDialog />
+      <MemoSettingsDialog />
+      <MemoProfileSheet />
     </div>
   );
 }

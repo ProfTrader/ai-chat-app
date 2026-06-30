@@ -194,6 +194,14 @@ export interface ProjectDataset {
   };
   columns: DatasetColumn[];
   rows: Array<Record<string, DatasetRowValue>>;
+  /**
+   * Worktree this dataset is staged in. Absent/undefined ⇒ it belongs to the
+   * team's HEAD lineage (canonical reference data). Set ⇒ isolated in a user's
+   * worktree branch until promoted.
+   */
+  worktreeId?: string;
+  /** HEAD version this dataset snapshot was created for (set on promotion). */
+  headVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -286,10 +294,19 @@ export interface AgentRun {
   updatedAt: string;
 }
 
+/**
+ * Org altitude — drives how analytical "insight" deliverables are framed:
+ * exec gets top-line KPIs + a risk verdict; ic gets granular, task-linked detail.
+ * Separate from `role` (a free-text job title); this is the typed reporting tier.
+ */
+export type OrgAltitude = "exec" | "manager" | "ic";
+
 export interface UserProfile {
   id: string;
   name: string;
   role: string;
+  /** Reporting altitude used to pick insight framing. Defaults to "exec". */
+  altitude?: OrgAltitude;
   email: string;
   workspace: string;
   bio?: string;

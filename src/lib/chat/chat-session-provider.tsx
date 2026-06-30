@@ -42,10 +42,19 @@ import {
   encodeDeliverablesMarker,
   encodeScheduleMarker,
 } from "@/lib/automation/client";
+import {
+  encodeInsightMarker,
+  requestInsightVerdict,
+  shouldRouteToInsight,
+  toneForStatus,
+} from "@/lib/insight/client";
+import { computeInsight } from "@/lib/insight/compute";
+import { currentUser } from "@/lib/current-user";
 import type {
   AgentBrainStage,
   ComposerMode,
   Contact,
+  DatasetRowValue,
   Message,
   PendingArtifactPlan,
   ProjectDataset,
@@ -105,6 +114,151 @@ function shouldClarify(text: string) {
       input,
     );
   return buildVerb && deliverable;
+}
+
+function truncateEvidence(value: string, maxLength = 180) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function datasetValueToText(value: DatasetRowValue) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value);
+}
+
+function queryTerms(text: string) {
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9&]+/i)
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 3),
+    ),
+  );
+}
+
+function rowEvidence(dataset: ProjectDataset, row: ProjectDataset["rows"][number]) {
+  const columnLabels = new Map(dataset.columns.map((column) => [column.key, column.label]));
+  return Object.entries(row)
+    .map(([key, value]) => {
+      const text = datasetValueToText(value);
+      if (!text) return null;
+      return `${columnLabels.get(key) ?? key}: ${truncateEvidence(text, 140)}`;
+    })
+    .filter((part): part is string => Boolean(part))
+    .slice(0, 14)
+    .join(" | ");
+}
+
+function buildDatasetEvidence(dataset: ProjectDataset, latestUserText: string) {
+  const terms = queryTerms(latestUserText);
+  const scored = dataset.rows.map((row, index) => {
+    const text = Object.values(row).map(datasetValueToText).join(" ").toLowerCase();
+    const score = terms.reduce((total, term) => total + (text.includes(term) ? 1 : 0), 0);
+    return { row, index, score };
+  });
+  const selected = scored
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 8);
+  const fallback = selected.length
+    ? selected
+    : scored.slice(0, Math.min(4, scored.length));
+
+  return fallback
+    .map((item) => rowEvidence(dataset, item.row))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function datasetSource(dataset: ProjectDataset) {
+  const metadata = dataset.sourceMetadata;
+  if (!metadata) {
+    const scope = dataset.worktreeId
+      ? `staged worktree ${dataset.worktreeId}`
+      : dataset.headVersion
+        ? `HEAD v${dataset.headVersion}`
+        : "project dataset";
+    return `${dataset.sourceKind}; ${scope}`;
+  }
+  return `${metadata.sourceName} (${metadata.sourceUrl})`;
+}
+
+function datasetNotes(dataset: ProjectDataset) {
+  const metadata = dataset.sourceMetadata;
+  if (metadata) return metadata.notes;
+  const sampleColumns = dataset.columns
+    .filter((column) => column.sampleValues.length > 0)
+    .slice(0, 4)
+    .map((column) => `${column.label} samples: ${column.sampleValues.slice(0, 3).join(", ")}`);
+  return sampleColumns.join("; ");
+}
+
+function datasetMatchesQuery(dataset: ProjectDataset, latestUserText: string) {
+  const terms = queryTerms(latestUserText);
+  if (terms.length === 0) return false;
+  const haystack = [
+    dataset.name,
+    dataset.domainId,
+    dataset.sourceKind,
+    ...(dataset.sourceMetadata
+      ? [
+          dataset.sourceMetadata.label,
+          dataset.sourceMetadata.sourceName,
+          dataset.sourceMetadata.notes ?? "",
+          ...dataset.sourceMetadata.useCases,
+        ]
+      : []),
+    ...dataset.rows.flatMap((row) => Object.values(row).map(datasetValueToText)),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return terms.some((term) => haystack.includes(term));
+}
+
+function projectContextDatasets(input: {
+  datasets: ProjectDataset[];
+  worktrees: ReturnType<typeof useDataStore.getState>["worktrees"];
+  projectId: string | null;
+  latestUserText: string;
+}) {
+  const byId = new Map(input.datasets.map((dataset) => [dataset.id, dataset]));
+  const selected = new Map<string, ProjectDataset>();
+
+  if (input.projectId) {
+    for (const dataset of input.datasets) {
+      if (dataset.projectId === input.projectId) selected.set(dataset.id, dataset);
+    }
+
+    for (const worktree of input.worktrees) {
+      if (worktree.teamId !== input.projectId || worktree.status === "discarded") continue;
+      for (const datasetId of worktree.datasetIds) {
+        const dataset = byId.get(datasetId);
+        if (dataset) selected.set(dataset.id, dataset);
+      }
+    }
+  }
+
+  for (const dataset of input.datasets) {
+    if (selected.has(dataset.id)) continue;
+    if (datasetMatchesQuery(dataset, input.latestUserText)) {
+      selected.set(dataset.id, dataset);
+    }
+  }
+
+  return Array.from(selected.values()).sort((a, b) => {
+    const stagedDelta = Number(Boolean(b.worktreeId)) - Number(Boolean(a.worktreeId));
+    if (stagedDelta !== 0) return stagedDelta;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
+function insightTitleFor(question: string): string {
+  const q = question.toLowerCase();
+  if (/\b(risk|negative|runway|burn|cash|under|red)\b/.test(q)) return "Cash & risk briefing";
+  if (/\b(overhead|cost|expense|margin)\b/.test(q)) return "Cost & margin briefing";
+  if (/\b(sales?|revenue)\b/.test(q)) return "Sales & cash briefing";
+  return "Executive briefing";
 }
 
 function planCardQuestion(text: string) {
@@ -620,6 +774,7 @@ interface ChatSessionContextValue {
   buildPlan: (planId: string) => Promise<void>;
   artifactBusy: boolean;
   send: (text: string) => Promise<void>;
+  runInsight: (question: string) => Promise<void>;
   composeEmail: (instruction: string) => Promise<void>;
   proposeTasks: (instruction: string) => Promise<void>;
   submitClarifyAnswers: (request: string, answers: string) => Promise<void>;
@@ -705,10 +860,13 @@ export function ChatSessionProvider({
   const automatePlan = useDataStore((s) => s.automatePlan);
   const schedulePlan = useDataStore((s) => s.schedulePlan);
   const getPlan = useDataStore((s) => s.getPlan);
+  const createInsight = useDataStore((s) => s.createInsight);
+  const ensureInsightDataset = useDataStore((s) => s.ensureInsightDataset);
   const {
     projects,
     workspaces,
     datasets,
+    worktrees,
     contacts,
     teamMembers,
     agentMemories,
@@ -753,8 +911,18 @@ export function ChatSessionProvider({
       new DefaultChatTransport({
         api: "/api/chat",
         credentials: "include",
-        prepareSendMessagesRequest: ({ messages, body }) => ({
-          body: {
+        prepareSendMessagesRequest: ({ messages, body }) => {
+          const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
+          const latestUserText = latestUserMessage ? uiMessageToText(latestUserMessage) : "";
+          const projectDatasets = projectContextDatasets({
+            datasets,
+            worktrees,
+            projectId,
+            latestUserText,
+          });
+
+          return {
+            body: {
             ...body,
             messages,
             sessionId,
@@ -797,25 +965,23 @@ export function ChatSessionProvider({
                     status: member.status,
                   }))
               : [],
-            datasetsSummary: projectId
-              ? datasets
-                  .filter((dataset) => dataset.projectId === projectId)
-                  .slice(0, 6)
-                  .map((dataset) => ({
-                    name: dataset.name,
-                    domainId: dataset.domainId,
-                    sourceKind: dataset.sourceKind,
-                    rowCount: dataset.rows.length,
-                    columnCount: dataset.columns.length,
-                    columns: dataset.columns
-                      .slice(0, 10)
-                      .map((column) =>
-                        column.semanticRole
-                          ? `${column.label} (${column.semanticRole})`
-                          : column.label,
-                      ),
-                  }))
-              : [],
+            datasetsSummary: projectDatasets.slice(0, 8).map((dataset) => ({
+              name: dataset.name,
+              domainId: dataset.domainId,
+              sourceKind: dataset.sourceKind,
+              rowCount: dataset.rows.length,
+              columnCount: dataset.columns.length,
+              columns: dataset.columns
+                .slice(0, 12)
+                .map((column) =>
+                  column.semanticRole
+                    ? `${column.label} (${column.semanticRole})`
+                    : column.label,
+                ),
+              source: datasetSource(dataset),
+              notes: datasetNotes(dataset),
+              evidence: buildDatasetEvidence(dataset, latestUserText),
+            })),
             memoriesSummary: projectId
               ? agentMemories
                   .filter((memory) => memory.projectId === projectId)
@@ -858,8 +1024,9 @@ export function ChatSessionProvider({
                   targetCustomers: onboardingProfile.targetCustomers,
                 }
               : undefined,
-          },
-        }),
+            },
+          };
+        },
       }),
     [
       authStatus?.model,
@@ -878,6 +1045,7 @@ export function ChatSessionProvider({
       researchDocs,
       sessionId,
       teamMembers,
+      worktrees,
       workspace?.name,
     ],
   );
@@ -1360,7 +1528,16 @@ export function ChatSessionProvider({
     }
 
     const explicitTaskRequest = composerMode !== "plan" && shouldRouteToTasks(cleanText);
-    const autoPlanRequest = composerMode !== "plan" && !explicitTaskRequest && shouldClarify(cleanText);
+    // Answer-first exec path: a question about the numbers ("today's sales?",
+    // "are we at risk of going negative?") renders an inline insight artifact,
+    // no intake. Never fires for build requests (those go to plan intake).
+    const insightRequest =
+      composerMode !== "plan" &&
+      !explicitTaskRequest &&
+      !shouldClarify(cleanText) &&
+      shouldRouteToInsight(cleanText);
+    const autoPlanRequest =
+      composerMode !== "plan" && !explicitTaskRequest && !insightRequest && shouldClarify(cleanText);
     const planModeForTurn = composerMode === "plan" || autoPlanRequest;
 
     if (autoPlanRequest) {
@@ -1420,6 +1597,11 @@ export function ChatSessionProvider({
     }
 
     if (!planModeForTurn) {
+      // Answer-first exec insight (inline charts), before the generic chat path.
+      if (insightRequest) {
+        await runInsight(cleanText);
+        return;
+      }
       // Natural-language "create tasks…" routes to the task-proposal artifact
       // (the user message is already persisted above).
       if (explicitTaskRequest) {
@@ -1605,6 +1787,120 @@ export function ChatSessionProvider({
     await persistChatMessage(sessionId, instruction, "user");
     chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
     await runTaskProposal(instruction);
+  };
+
+  // Build an inline executive-insight artifact: compute the numbers from the
+  // project dataset (or the finance sample), enrich the verdict prose via the
+  // model (best-effort), persist a record, and drop a `[[nexus:insight:<id>]]`
+  // marker so the chart renders inline. `question` is the user's ask; for plan
+  // mode this is called by buildPlan with the plan as context.
+  const renderInsight = async (input: {
+    question: string;
+    title?: string;
+    leadIn?: string;
+    forProjectId?: string | null;
+    runBrain?: boolean;
+  }) => {
+    if (!sessionId) return;
+    const insightProjectId = input.forProjectId ?? projectId ?? undefined;
+    const altitude = currentUser.altitude ?? "exec";
+    // Ground in REAL data: reuse a finance-shaped project dataset, or seed the
+    // real supermarket dataset so the model analyzes a genuine P&L.
+    const dataset = insightProjectId ? await ensureInsightDataset(insightProjectId) : null;
+
+    const draft = computeInsight({
+      dataset,
+      question: input.question,
+      altitude,
+      projectId: insightProjectId,
+      sessionId,
+      projectName: project?.name,
+      title: input.title ?? insightTitleFor(input.question),
+    });
+
+    // The LLM reads the real numbers and decides the verdict (status + prose).
+    // Charts/KPIs stay on the deterministic real numbers; only a hard failure
+    // falls back to the computed verdict.
+    const verdict = await requestInsightVerdict({
+      question: input.question,
+      altitude,
+      projectName: project?.name,
+      model: authStatus?.model,
+      draft,
+    });
+    const finalDraft = verdict
+      ? {
+          ...draft,
+          verdict,
+          kpis: draft.kpis.map((kpi) =>
+            kpi.key === "runway" ? { ...kpi, tone: toneForStatus(verdict.status) } : kpi,
+          ),
+        }
+      : draft;
+
+    const record = createInsight(finalDraft);
+    const leadIn = input.leadIn ?? "Here's the read on the numbers.";
+    await persistChatMessage(sessionId, `${leadIn}\n\n${encodeInsightMarker(record.id)}`, "assistant");
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    return record;
+  };
+
+  const runInsight = async (question: string) => {
+    if (!sessionId) {
+      toast.error("Select or create a session first.");
+      return;
+    }
+    setActivities([
+      {
+        id: "insight-status",
+        status: "running",
+        label: "Pulling the numbers",
+        detail: "Reading project data and computing today's sales, overhead, and cash trajectory.",
+        toolName: "insight",
+      },
+    ]);
+    chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+    setArtifactBusy(true);
+    const run = startAgentBrainRun({
+      projectId: activeProjectId,
+      sessionId,
+      request: question,
+      title: "Executive insight",
+      intent: "conversation",
+      outputKind: "conversation",
+      model: authStatus?.model,
+    });
+    activeBrainRunIdRef.current = run.id;
+    advanceAgentBrainRun(
+      run.id,
+      "retrieve_context",
+      "Reading data",
+      "Aggregating the project dataset into daily sales, overhead, and net.",
+    );
+    try {
+      const record = await renderInsight({ question });
+      advanceAgentBrainRun(
+        run.id,
+        "deliver",
+        "Insight delivered",
+        record?.verdict.headline ?? "Executive insight rendered inline.",
+      );
+      if (record) {
+        recordAgentObservation(run.id, "Executive insight", record.verdict.headline, [record.id]);
+      }
+      completeAgentBrainRun(run.id);
+    } catch (error) {
+      completeAgentBrainRun(
+        run.id,
+        "failed",
+        error instanceof Error ? error.message : "Insight generation failed.",
+      );
+      toast.error(error instanceof Error ? error.message : "Failed to build the insight.");
+    } finally {
+      activeBrainRunIdRef.current = null;
+      setArtifactBusy(false);
+      setActivities([]);
+    }
   };
 
   // After the interactive questions are answered, turn the request + answers
@@ -1900,6 +2196,21 @@ export function ChatSessionProvider({
         "assistant",
       );
       chat.setMessages(getMessagesBySession(sessionId).map(messageToUi));
+
+      // The plan feeds an inline executive briefing — the numbers rendered
+      // right in the thread (charts + verdict), no download required.
+      try {
+        await renderInsight({
+          question: plan
+            ? `Where do our numbers stand as we run "${plan.title}"? Are we at risk of going negative?`
+            : "Where do our numbers stand right now?",
+          title: plan ? `${plan.title} — exec briefing` : "Executive briefing",
+          leadIn: "And here's the executive read on the numbers — live in the chat, no download needed.",
+          forProjectId: plan?.projectId ?? projectId,
+        });
+      } catch (error) {
+        console.warn("Inline insight generation failed after plan build.", error);
+      }
     }
 
     toast.success(
@@ -1921,6 +2232,7 @@ export function ChatSessionProvider({
     buildPlan,
     artifactBusy,
     send,
+    runInsight,
     composeEmail,
     proposeTasks,
     submitClarifyAnswers,

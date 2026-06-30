@@ -1,23 +1,49 @@
+import { lazy, Suspense } from "react";
 import { CalendarDays, Columns3, ContactRound, Database, FileText, Inbox, ListTodo, Network } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ChatSessionProvider } from "@/lib/chat/chat-session-provider";
-import { ChatThread } from "@/components/workspace/chat-thread";
-import { ContactList } from "@/components/workspace/contact-list";
-import { EmptyState } from "@/components/workspace/empty-state";
-import { TaskList } from "@/components/workspace/task-list";
-import { KanbanBoard } from "@/components/workspace/kanban-board";
-import { NodeManager } from "@/components/workspace/node-manager";
-import { InboxWorkspace } from "@/components/workspace/inbox-workspace";
-import { BriefsWorkspace } from "@/components/workspace/briefs-workspace";
-import { TimelineWorkspace } from "@/components/workspace/timeline-workspace";
-import { ChatComposer } from "@/components/composer/chat-composer";
 import { useShellStore } from "@/stores/shell-store";
 import { useSelectionStore } from "@/stores/selection-store";
 import { useDataStore } from "@/stores/data-store";
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
 import type { ViewType } from "@/types";
+
+const ChatWorkspace = lazy(() =>
+  import("@/components/workspace/chat-workspace").then((module) => ({
+    default: module.ChatWorkspace,
+  })),
+);
+const BriefsWorkspace = lazy(() =>
+  import("@/components/workspace/briefs-workspace").then((module) => ({
+    default: module.BriefsWorkspace,
+  })),
+);
+const TaskList = lazy(() =>
+  import("@/components/workspace/task-list").then((module) => ({
+    default: module.TaskList,
+  })),
+);
+const KanbanBoard = lazy(() =>
+  import("@/components/workspace/kanban-board").then((module) => ({
+    default: module.KanbanBoard,
+  })),
+);
+const ContactList = lazy(() =>
+  import("@/components/workspace/contact-list").then((module) => ({
+    default: module.ContactList,
+  })),
+);
+const TimelineWorkspace = lazy(() =>
+  import("@/components/workspace/timeline-workspace").then((module) => ({
+    default: module.TimelineWorkspace,
+  })),
+);
+const NodeManager = lazy(() =>
+  import("@/components/workspace/node-manager").then((module) => ({
+    default: module.NodeManager,
+  })),
+);
 
 const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description: string }> = {
   chat: {
@@ -58,6 +84,10 @@ const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description:
 };
 
 const projectViews: ViewType[] = ["chat", "briefs", "tasks", "board", "contacts"];
+
+function WorkspaceFallback() {
+  return <div className="h-full bg-shell" aria-label="Loading workspace" />;
+}
 
 export function MainWorkspace() {
   const { activeView, sidebarMode } = useShellStore();
@@ -143,21 +173,17 @@ export function MainWorkspace() {
       </div>
 
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {activeView === "chat" &&
-          (sidebarMode === "inbox" ? (
-            <InboxWorkspace />
-          ) : (
-            <ChatSessionProvider sessionId={sessionId}>
-              {sessionId ? <ChatThread /> : <EmptyState />}
-              <ChatComposer />
-            </ChatSessionProvider>
-          ))}
-        {activeView === "briefs" && <BriefsWorkspace />}
-        {activeView === "tasks" && <TaskList />}
-        {activeView === "board" && <KanbanBoard />}
-        {activeView === "contacts" && <ContactList />}
-        {activeView === "timeline" && <TimelineWorkspace />}
-        {activeView === "nodes" && <NodeManager />}
+        <Suspense fallback={<WorkspaceFallback />}>
+          {activeView === "chat" && (
+            <ChatWorkspace sessionId={sessionId} sidebarMode={sidebarMode} />
+          )}
+          {activeView === "briefs" && <BriefsWorkspace />}
+          {activeView === "tasks" && <TaskList />}
+          {activeView === "board" && <KanbanBoard />}
+          {activeView === "contacts" && <ContactList />}
+          {activeView === "timeline" && <TimelineWorkspace />}
+          {activeView === "nodes" && <NodeManager />}
+        </Suspense>
       </div>
     </div>
   );

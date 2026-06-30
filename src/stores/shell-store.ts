@@ -4,6 +4,17 @@ import type { ViewType } from "@/types";
 
 export type SidebarMode = "chat" | "inbox" | "projects";
 
+const viewTypes = new Set<ViewType>([
+  "chat",
+  "briefs",
+  "tasks",
+  "contacts",
+  "board",
+  "timeline",
+  "nodes",
+]);
+const sidebarModes = new Set<SidebarMode>(["chat", "inbox", "projects"]);
+
 const NAV_PANEL_DEFAULT = 33;
 const INSPECTOR_PANEL_DEFAULT = 30;
 const NAV_PANEL_MIN = 18;
@@ -17,6 +28,16 @@ function normalizeNavPanelSize(size: unknown): number {
 function normalizeInspectorPanelSize(size: unknown): number {
   if (typeof size !== "number" || Number.isNaN(size)) return INSPECTOR_PANEL_DEFAULT;
   return Math.min(40, Math.max(INSPECTOR_PANEL_MIN, size));
+}
+
+function normalizeViewType(view: unknown): ViewType {
+  return typeof view === "string" && viewTypes.has(view as ViewType) ? (view as ViewType) : "chat";
+}
+
+function normalizeSidebarMode(mode: unknown): SidebarMode {
+  return typeof mode === "string" && sidebarModes.has(mode as SidebarMode)
+    ? (mode as SidebarMode)
+    : "projects";
 }
 
 interface ShellState {
@@ -71,8 +92,8 @@ export const useShellStore = create<ShellState>()(
       setInspectorCollapsed: (inspectorCollapsed) => set({ inspectorCollapsed }),
       toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
       toggleInspector: () => set((s) => ({ inspectorCollapsed: !s.inspectorCollapsed })),
-      setSidebarMode: (sidebarMode) => set({ sidebarMode }),
-      setActiveView: (activeView) => set({ activeView }),
+      setSidebarMode: (sidebarMode) => set({ sidebarMode: normalizeSidebarMode(sidebarMode) }),
+      setActiveView: (activeView) => set({ activeView: normalizeViewType(activeView) }),
       setCommandOpen: (commandOpen) => set({ commandOpen }),
       setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -121,6 +142,8 @@ export const useShellStore = create<ShellState>()(
           inspectorPanelSize: normalizeInspectorPanelSize(
             saved?.inspectorPanelSize ?? current.inspectorPanelSize,
           ),
+          activeView: normalizeViewType(saved?.activeView ?? current.activeView),
+          sidebarMode: normalizeSidebarMode(saved?.sidebarMode ?? current.sidebarMode),
         };
       },
       partialize: (state) => ({

@@ -46,8 +46,16 @@ import {
   normalizePlanTier,
   type PlanDraft,
   type PlanRecord,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   type PlanStatus,
 } from "@/lib/plan/client";
+import type { InsightDraft, InsightRecord } from "@/lib/insight/client";
+import {
+  buildPromotedHead,
+  headVersionLabel,
+  type HeadVersion,
+  type Worktree,
+} from "@/lib/worktree/client";
 import {
   deriveAutomationFields,
   deriveCadence,
@@ -131,6 +139,9 @@ interface DataState {
   taskActivities: TaskActivity[];
   roadmapItems: RoadmapItem[];
   plans: PlanRecord[];
+  insights: InsightRecord[];
+  worktrees: Worktree[];
+  headVersions: HeadVersion[];
   automations: AutomationRule[];
   scheduleEntries: ScheduleEntry[];
   selectedWorkRunId: string | null;
@@ -179,6 +190,45 @@ interface DataState {
   /** Approve a plan: turn its steps into board tasks and mark it approved. */
   buildPlanTasks: (id: string) => Task[];
   getPlan: (id: string) => PlanRecord | undefined;
+  /** Persist a computed executive-insight record and return it. */
+  createInsight: (draft: InsightDraft) => InsightRecord;
+  getInsight: (id: string) => InsightRecord | undefined;
+  /**
+   * Guarantee the project has a finance-shaped dataset for insights: return an
+   * existing one (revenue/sales role) or seed the real supermarket dataset.
+   */
+  ensureInsightDataset: (projectId: string) => Promise<ProjectDataset>;
+
+  // --- Worktrees + HEAD (git-style data delivery) --------------------------
+  /** Create a user-owned staging branch for a team. */
+  createWorktree: (teamId: string, name: string) => Worktree;
+  getWorktree: (id: string) => Worktree | undefined;
+  getWorktreesByTeam: (teamId: string) => Worktree[];
+  /** Import a CSV into a worktree (isolated from HEAD until promoted). */
+  importToWorktree: (
+    worktreeId: string,
+    name: string,
+    domainId: AgentDomainId,
+    text: string,
+  ) => ProjectDataset | null;
+  /** Stage a sample dataset into a worktree (for quick testing). */
+  addSampleToWorktree: (worktreeId: string, domainId: AgentDomainId) => ProjectDataset | null;
+  /** Datasets staged in a worktree. */
+  getWorktreeDatasets: (worktreeId: string) => ProjectDataset[];
+  /** Latest HEAD version for a team (undefined if none yet). */
+  getHeadVersion: (teamId: string) => HeadVersion | undefined;
+  /** HEAD version history for a team, newest first. */
+  getHeadVersions: (teamId: string) => HeadVersion[];
+  /** Datasets composing the team's current HEAD (latest version). */
+  getHeadDatasets: (teamId: string) => ProjectDataset[];
+  /** Initialise HEAD v1 from a team's existing (non-worktree) datasets. */
+  ensureHead: (teamId: string) => HeadVersion | undefined;
+  /** Move a worktree into review (the CD approval gate). */
+  requestWorktreePromotion: (worktreeId: string, note?: string) => Worktree | null;
+  /** Approve + merge a worktree into a new immutable HEAD version. */
+  promoteWorktree: (worktreeId: string) => HeadVersion | null;
+  discardWorktree: (worktreeId: string) => void;
+
   /** Derive one automation rule per plan step (idempotent per plan). */
   automatePlan: (id: string) => AutomationRule[];
   /** Lay the plan's steps onto a schedule and stamp due dates on tasks. */
@@ -335,6 +385,9 @@ type PersistedDataPayload = {
   taskActivities?: TaskActivity[];
   roadmapItems?: RoadmapItem[];
   plans?: PlanRecord[];
+  insights?: InsightRecord[];
+  worktrees?: Worktree[];
+  headVersions?: HeadVersion[];
   automations?: AutomationRule[];
   scheduleEntries?: ScheduleEntry[];
   notifications?: AppNotification[];
@@ -644,6 +697,9 @@ function hydratePersistedData(
     taskActivities: resetMock ? [] : data.taskActivities ?? seedTaskActivityItems,
     roadmapItems: resetMock ? [] : data.roadmapItems ?? seedRoadmapItems,
     plans: resetMock ? [] : Array.isArray(data.plans) ? data.plans : [],
+    insights: resetMock ? [] : Array.isArray(data.insights) ? data.insights : [],
+    worktrees: resetMock ? [] : Array.isArray(data.worktrees) ? data.worktrees : [],
+    headVersions: resetMock ? [] : Array.isArray(data.headVersions) ? data.headVersions : [],
     automations: resetMock ? [] : Array.isArray(data.automations) ? data.automations : [],
     scheduleEntries: resetMock ? [] : Array.isArray(data.scheduleEntries) ? data.scheduleEntries : [],
     notifications: resetMock ? [] : data.notifications ?? [],
@@ -685,6 +741,9 @@ export const useDataStore = create<DataState>((set, get) => ({
   taskActivities: seedTaskActivityItems,
   roadmapItems: seedRoadmapItems,
   plans: [],
+  insights: [],
+  worktrees: [],
+  headVersions: [],
   automations: [],
   scheduleEntries: [],
   notifications: [],
@@ -1081,6 +1140,231 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   getPlan: (id) => get().plans.find((plan) => plan.id === id),
+
+  createInsight: (draft) => {
+    const now = new Date().toISOString();
+    const record: InsightRecord = {
+      ...draft,
+      id: generateId("insight"),
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ insights: [record, ...get().insights] });
+    persistLocal(get());
+    return record;
+  },
+
+  getInsight: (id) => get().insights.find((insight) => insight.id === id),
+
+  ensureInsightDataset: async (projectId) => {
+    const existing = get().datasets.find(
+      (dataset) =>
+        dataset.projectId === projectId &&
+        !dataset.worktreeId && // only HEAD-lineage data, never staged worktree data
+        dataset.columns.some(
+          (column) => column.semanticRole === "revenue" || column.semanticRole === "sales",
+        ),
+    );
+    if (existing) return existing;
+    const { createSupermarketDataset } = await import("@/lib/insight/supermarket-data");
+    const dataset = createSupermarketDataset(projectId);
+    set({ datasets: [dataset, ...get().datasets] });
+    persistLocal(get());
+    return dataset;
+  },
+
+  // --- Worktrees + HEAD ------------------------------------------------------
+
+  createWorktree: (teamId, name) => {
+    const now = new Date().toISOString();
+    const worktree: Worktree = {
+      id: generateId("wt"),
+      teamId,
+      name: name.trim() || "Untitled branch",
+      ownerId: currentUser.id,
+      ownerName: currentUser.name,
+      status: "draft",
+      datasetIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({ worktrees: [worktree, ...get().worktrees] });
+    persistLocal(get());
+    return worktree;
+  },
+
+  getWorktree: (id) => get().worktrees.find((w) => w.id === id),
+
+  getWorktreesByTeam: (teamId) =>
+    get().worktrees.filter((w) => w.teamId === teamId && w.status !== "discarded"),
+
+  importToWorktree: (worktreeId, name, domainId, text) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree) return null;
+    const now = new Date().toISOString();
+    const dataset: ProjectDataset = {
+      ...createDatasetFromCsv({ projectId: worktree.teamId, name, domainId, text }),
+      worktreeId,
+    };
+    set({
+      datasets: [dataset, ...get().datasets],
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId
+          ? { ...w, datasetIds: [dataset.id, ...w.datasetIds], updatedAt: now }
+          : w,
+      ),
+    });
+    persistLocal(get());
+    return dataset;
+  },
+
+  addSampleToWorktree: (worktreeId, domainId) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree) return null;
+    const now = new Date().toISOString();
+    const dataset: ProjectDataset = {
+      ...createSampleDataset(worktree.teamId, domainId),
+      worktreeId,
+    };
+    set({
+      datasets: [dataset, ...get().datasets],
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId
+          ? { ...w, datasetIds: [dataset.id, ...w.datasetIds], updatedAt: now }
+          : w,
+      ),
+    });
+    persistLocal(get());
+    return dataset;
+  },
+
+  getWorktreeDatasets: (worktreeId) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree) return [];
+    const byId = new Map(get().datasets.map((d) => [d.id, d]));
+    return worktree.datasetIds
+      .map((id) => byId.get(id))
+      .filter((d): d is ProjectDataset => Boolean(d));
+  },
+
+  getHeadVersion: (teamId) =>
+    get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version)[0],
+
+  getHeadVersions: (teamId) =>
+    get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version),
+
+  getHeadDatasets: (teamId) => {
+    const head = get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version)[0];
+    if (!head) return [];
+    const byId = new Map(get().datasets.map((d) => [d.id, d]));
+    return head.datasetIds
+      .map((id) => byId.get(id))
+      .filter((d): d is ProjectDataset => Boolean(d));
+  },
+
+  ensureHead: (teamId) => {
+    const existing = get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version)[0];
+    if (existing) return existing;
+    // Seed HEAD v1 from the team's existing canonical (non-worktree) datasets.
+    const baseDatasets = get().datasets.filter(
+      (d) => d.projectId === teamId && !d.worktreeId,
+    );
+    if (baseDatasets.length === 0) return undefined;
+    const now = new Date().toISOString();
+    const head: HeadVersion = {
+      id: generateId("head"),
+      teamId,
+      version: 1,
+      label: "v1 — initial",
+      datasetIds: baseDatasets.map((d) => d.id),
+      createdBy: currentUser.id,
+      createdAt: now,
+    };
+    set({ headVersions: [head, ...get().headVersions] });
+    persistLocal(get());
+    return head;
+  },
+
+  requestWorktreePromotion: (worktreeId, note) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree || worktree.datasetIds.length === 0) return null;
+    const now = new Date().toISOString();
+    const updated: Worktree = {
+      ...worktree,
+      status: "in_review",
+      note: note ?? worktree.note,
+      updatedAt: now,
+    };
+    set({ worktrees: get().worktrees.map((w) => (w.id === worktreeId ? updated : w)) });
+    persistLocal(get());
+    return updated;
+  },
+
+  promoteWorktree: (worktreeId) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree || worktree.datasetIds.length === 0) return null;
+    const teamId = worktree.teamId;
+    const prev = get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version)[0];
+    const byId = new Map(get().datasets.map((d) => [d.id, d]));
+    const headDatasets = prev
+      ? (prev.datasetIds.map((id) => byId.get(id)).filter(Boolean) as ProjectDataset[])
+      : [];
+    const worktreeDatasets = worktree.datasetIds
+      .map((id) => byId.get(id))
+      .filter(Boolean) as ProjectDataset[];
+    const version = (prev?.version ?? 0) + 1;
+    const now = new Date().toISOString();
+    const { newDatasets, datasetIds } = buildPromotedHead({
+      version,
+      headDatasets,
+      worktreeDatasets,
+      makeId: generateId,
+      now,
+    });
+    const head: HeadVersion = {
+      id: generateId("head"),
+      teamId,
+      version,
+      label: headVersionLabel(version, worktree.name),
+      datasetIds,
+      sourceWorktreeId: worktree.id,
+      note: worktree.note,
+      createdBy: currentUser.id,
+      createdAt: now,
+      parentVersion: prev?.version,
+    };
+    set({
+      datasets: [...newDatasets, ...get().datasets],
+      headVersions: [head, ...get().headVersions],
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId
+          ? { ...w, status: "promoted", promotedToVersion: version, updatedAt: now }
+          : w,
+      ),
+    });
+    persistLocal(get());
+    return head;
+  },
+
+  discardWorktree: (worktreeId) => {
+    const now = new Date().toISOString();
+    set({
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId ? { ...w, status: "discarded", updatedAt: now } : w,
+      ),
+    });
+    persistLocal(get());
+  },
 
   automatePlan: (id) => {
     const plan = get().plans.find((item) => item.id === id);
@@ -2140,6 +2424,9 @@ function persistLocal(state: DataState) {
     taskActivities: state.taskActivities,
     roadmapItems: state.roadmapItems,
     plans: state.plans,
+    insights: state.insights,
+    worktrees: state.worktrees,
+    headVersions: state.headVersions,
     automations: state.automations,
     scheduleEntries: state.scheduleEntries,
     notifications: state.notifications,

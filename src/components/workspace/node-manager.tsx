@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addEdge,
   Background,
@@ -507,9 +507,15 @@ export function NodeManager() {
   const [connectKind, setConnectKind] = useState<PortKind>("json");
   const [publishedVersion, setPublishedVersion] = useState(1);
   const [lastPublishedAt, setLastPublishedAt] = useState("Draft autosaved");
+  const [canvasReady, setCanvasReady] = useState(false);
   const [sampleInput, setSampleInput] = useState(
     "A prompt and invoice packet ask the system to inspect the requested action, decide whether Accounts, Support, or Tax should work on it, loop until the output is complete, then finish or escalate.",
   );
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setCanvasReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   const nodes = useMemo(
     () =>
@@ -1085,50 +1091,54 @@ export function NodeManager() {
 
         {mode === "build" && (
           <div ref={flowPaneRef} className="relative h-full min-h-0 min-w-0 flex-1 bg-shell">
-            <ReactFlowProvider>
-              <ReactFlow
-                colorMode={resolvedTheme === "light" ? "light" : "dark"}
-                nodes={renderedFlowNodes}
-                edges={[]}
-                nodeTypes={nodeTypes}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onNodeClick={(_, node) => selectFlowNode(node.id)}
-                onSelectionChange={({ nodes: selectedNodes }) => {
-                  const nextSelected = selectedNodes[0]?.id;
-                  if (nextSelected) setSelectedNodeId(nextSelected);
-                }}
-                onInit={(instance) => {
-                  setFlowInstance(instance);
-                  window.requestAnimationFrame(() => {
-                    instance.fitView(fitViewOptions);
-                  });
-                }}
-                fitView
-                fitViewOptions={fitViewOptions}
-                minZoom={0.25}
-                maxZoom={1.1}
-                connectionRadius={32}
-                defaultEdgeOptions={{ type: "smoothstep" }}
-                className="bg-[radial-gradient(circle_at_1px_1px,var(--border)_1px,transparent_0)] bg-[length:24px_24px]"
-              >
-                <FlowConnectionLines edges={flowEdges} nodes={renderedFlowNodes} />
-                <Background gap={24} size={0.5} color="var(--border)" />
-                <Controls
-                  className="overflow-hidden rounded-md border border-border bg-pane shadow-sm"
-                  showInteractive={false}
-                />
-                <MiniMap
-                  className="overflow-hidden rounded-md border border-border bg-pane shadow-sm"
-                  nodeColor={(node) =>
-                    node.id === selectedNodeId ? "var(--active)" : "var(--muted)"
-                  }
-                  pannable
-                  zoomable
-                />
-              </ReactFlow>
-            </ReactFlowProvider>
+            {canvasReady ? (
+              <ReactFlowProvider>
+                <ReactFlow
+                  colorMode={resolvedTheme === "light" ? "light" : "dark"}
+                  nodes={renderedFlowNodes}
+                  edges={[]}
+                  nodeTypes={nodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onNodeClick={(_, node) => selectFlowNode(node.id)}
+                  onSelectionChange={({ nodes: selectedNodes }) => {
+                    const nextSelected = selectedNodes[0]?.id;
+                    if (nextSelected) setSelectedNodeId(nextSelected);
+                  }}
+                  onInit={(instance) => {
+                    setFlowInstance(instance);
+                    window.requestAnimationFrame(() => {
+                      instance.fitView(fitViewOptions);
+                    });
+                  }}
+                  fitView
+                  fitViewOptions={fitViewOptions}
+                  minZoom={0.25}
+                  maxZoom={1.1}
+                  connectionRadius={32}
+                  defaultEdgeOptions={{ type: "smoothstep" }}
+                  className="bg-[radial-gradient(circle_at_1px_1px,var(--border)_1px,transparent_0)] bg-[length:24px_24px]"
+                >
+                  <FlowConnectionLines edges={flowEdges} nodes={renderedFlowNodes} />
+                  <Background gap={24} size={0.5} color="var(--border)" />
+                  <Controls
+                    className="overflow-hidden rounded-md border border-border bg-pane shadow-sm"
+                    showInteractive={false}
+                  />
+                  <MiniMap
+                    className="overflow-hidden rounded-md border border-border bg-pane shadow-sm"
+                    nodeColor={(node) =>
+                      node.id === selectedNodeId ? "var(--active)" : "var(--muted)"
+                    }
+                    pannable
+                    zoomable
+                  />
+                </ReactFlow>
+              </ReactFlowProvider>
+            ) : (
+              <div className="h-full bg-[radial-gradient(circle_at_1px_1px,var(--border)_1px,transparent_0)] bg-[length:24px_24px]" />
+            )}
 
             <div className="pointer-events-none absolute left-5 top-5 flex items-center gap-2 rounded-md border border-border bg-pane px-3 py-2 text-xs text-muted-foreground shadow-sm">
               <Sparkles />

@@ -57,6 +57,9 @@ export const chatContextSchema = z.object({
         rowCount: z.number(),
         columnCount: z.number(),
         columns: z.array(z.string()).default([]),
+        source: z.string().optional(),
+        notes: z.string().optional(),
+        evidence: z.array(z.string()).default([]),
       }),
     )
     .default([]),
@@ -181,8 +184,14 @@ export function buildSystemPrompt(context: ChatContext): string {
     context.datasetsSummary.length > 0
       ? context.datasetsSummary
           .map(
-            (dataset) =>
-              `- ${dataset.name} [${dataset.domainId}/${dataset.sourceKind}] ${dataset.rowCount.toLocaleString()} rows, ${dataset.columnCount} columns: ${dataset.columns.join(", ") || "columns not listed"}`,
+            (dataset) => {
+              const source = dataset.source ? ` | source=${truncate(dataset.source, 180)}` : "";
+              const notes = dataset.notes ? ` | notes=${truncate(dataset.notes, 180)}` : "";
+              const evidence = dataset.evidence.length
+                ? `\n  Evidence rows:\n${dataset.evidence.map((row) => `  - ${truncate(row, 420)}`).join("\n")}`
+                : "";
+              return `- ${dataset.name} [${dataset.domainId}/${dataset.sourceKind}] ${dataset.rowCount.toLocaleString()} rows, ${dataset.columnCount} columns: ${dataset.columns.join(", ") || "columns not listed"}${source}${notes}${evidence}`;
+            },
           )
           .join("\n")
       : "No project datasets provided.";

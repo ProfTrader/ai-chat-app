@@ -1,6 +1,5 @@
+import { lazy, Suspense } from "react";
 import { ArrowUpRight, Check, Copy, FileText, ImageIcon } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble";
@@ -13,21 +12,13 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { Button } from "@/components/ui/button";
-import { EmailArtifact } from "@/components/workspace/email-artifact";
-import { TaskProposalArtifact } from "@/components/workspace/task-proposal-artifact";
-import { InteractiveQuestions } from "@/components/workspace/interactive-questions";
-import { DocArtifact } from "@/components/workspace/doc-artifact";
-import { DeliveryChoice } from "@/components/workspace/delivery-choice";
-import { PlanArtifact } from "@/components/workspace/plan-artifact";
-import { AutomationArtifact } from "@/components/workspace/automation-artifact";
-import { ScheduleArtifact } from "@/components/workspace/schedule-artifact";
-import { DeliverablesArtifact } from "@/components/workspace/deliverables-artifact";
 import { parseMessageAttachments, formatBytes } from "@/lib/chat/attachments";
 import { parseEmailMarker } from "@/lib/email/client";
 import { parseTasksMarker } from "@/lib/tasks/client";
 import { parseClarifyMarker } from "@/lib/clarify/client";
 import { parseDocMarker, parseDeliveryMarker } from "@/lib/docs/client";
 import { parsePlanMarker, stripPlanMarkers } from "@/lib/plan/client";
+import { parseInsightMarker, stripInsightMarkers } from "@/lib/insight/client";
 import {
   parseAutomationMarker,
   parseScheduleMarker,
@@ -53,6 +44,62 @@ import { currentUser } from "@/lib/current-user";
 import dexterAvatar from "@/assets/dexter-avatar.png";
 
 const NO_REACTIONS: string[] = [];
+
+const MarkdownContent = lazy(() =>
+  import("@/components/workspace/markdown-content").then((module) => ({
+    default: module.MarkdownContent,
+  })),
+);
+const EmailArtifact = lazy(() =>
+  import("@/components/workspace/email-artifact").then((module) => ({
+    default: module.EmailArtifact,
+  })),
+);
+const TaskProposalArtifact = lazy(() =>
+  import("@/components/workspace/task-proposal-artifact").then((module) => ({
+    default: module.TaskProposalArtifact,
+  })),
+);
+const InteractiveQuestions = lazy(() =>
+  import("@/components/workspace/interactive-questions").then((module) => ({
+    default: module.InteractiveQuestions,
+  })),
+);
+const DocArtifact = lazy(() =>
+  import("@/components/workspace/doc-artifact").then((module) => ({
+    default: module.DocArtifact,
+  })),
+);
+const DeliveryChoice = lazy(() =>
+  import("@/components/workspace/delivery-choice").then((module) => ({
+    default: module.DeliveryChoice,
+  })),
+);
+const PlanArtifact = lazy(() =>
+  import("@/components/workspace/plan-artifact").then((module) => ({
+    default: module.PlanArtifact,
+  })),
+);
+const AutomationArtifact = lazy(() =>
+  import("@/components/workspace/automation-artifact").then((module) => ({
+    default: module.AutomationArtifact,
+  })),
+);
+const ScheduleArtifact = lazy(() =>
+  import("@/components/workspace/schedule-artifact").then((module) => ({
+    default: module.ScheduleArtifact,
+  })),
+);
+const DeliverablesArtifact = lazy(() =>
+  import("@/components/workspace/deliverables-artifact").then((module) => ({
+    default: module.DeliverablesArtifact,
+  })),
+);
+const InsightArtifact = lazy(() =>
+  import("@/components/workspace/insight-artifact").then((module) => ({
+    default: module.InsightArtifact,
+  })),
+);
 
 function ReactionBar({
   reactions,
@@ -123,23 +170,9 @@ function renderMarkdown(content: string, key: string) {
   if (!content.trim()) return null;
 
   return (
-    <div
-      key={key}
-      className={cn(
-        "prose prose-sm max-w-none text-current",
-        "[&_a]:underline [&_a]:underline-offset-4",
-        "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
-        "[&_h1]:mb-2 [&_h1]:mt-1 [&_h1]:text-base [&_h1]:font-semibold",
-        "[&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold",
-        "[&_h3]:mb-1.5 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-medium",
-        "[&_li]:my-1 [&_ol]:my-2 [&_p]:my-2 [&_p]:leading-7 [&_ul]:my-2",
-        "[&_strong]:font-semibold",
-      )}
-    >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
-    </div>
+    <Suspense key={key} fallback={<p className="whitespace-pre-wrap text-sm leading-7">{content}</p>}>
+      <MarkdownContent content={content} />
+    </Suspense>
   );
 }
 
@@ -236,7 +269,8 @@ export function ChatMessage({
   const { cleanText: textWithoutDeliver } = parseDeliveryMarker(textWithoutDoc);
   const textWithoutPlan = stripPlanMarkers(textWithoutDeliver);
   const textWithoutPipeline = stripAutomationMarkers(textWithoutPlan);
-  const { runId, cleanText } = parseViewBriefMarker(textWithoutPipeline);
+  const textWithoutInsight = stripInsightMarkers(textWithoutPipeline);
+  const { runId, cleanText } = parseViewBriefMarker(textWithoutInsight);
   const selectWorkRun = useDataStore((state) => state.selectWorkRun);
   const setActiveView = useShellStore((state) => state.setActiveView);
   const { reactToMessage } = useChatSession();
@@ -334,8 +368,10 @@ export function ChatMessage({
                 parseScheduleMarker(textWithoutAutomation);
               const { planId: deliverablesPlanId, cleanText: textWithoutDeliverables } =
                 parseDeliverablesMarker(textWithoutSchedule);
+              const { insightId, cleanText: textWithoutInsightPart } =
+                parseInsightMarker(textWithoutDeliverables);
               const partText = parseViewBriefMarker(
-                stripPlanMarkers(textWithoutDeliverables),
+                stripPlanMarkers(textWithoutInsightPart),
               ).cleanText;
               if (
                 !partText &&
@@ -347,7 +383,8 @@ export function ChatMessage({
                 !planId &&
                 !automationPlanId &&
                 !schedulePlanId &&
-                !deliverablesPlanId
+                !deliverablesPlanId &&
+                !insightId
               )
                 return null;
 
@@ -360,17 +397,20 @@ export function ChatMessage({
                       </BubbleContent>
                     </Bubble>
                   )}
-                  {email && <EmailArtifact email={email} />}
-                  {proposedTasks && proposedTasks.length > 0 && (
-                    <TaskProposalArtifact tasks={proposedTasks} />
-                  )}
-                  {clarifyPayload && <InteractiveQuestions payload={clarifyPayload} />}
-                  {docPayload && <DocArtifact payload={docPayload} />}
-                  {deliveryPayload && <DeliveryChoice payload={deliveryPayload} />}
-                  {planId && <PlanArtifact planId={planId} />}
-                  {automationPlanId && <AutomationArtifact planId={automationPlanId} />}
-                  {schedulePlanId && <ScheduleArtifact planId={schedulePlanId} />}
-                  {deliverablesPlanId && <DeliverablesArtifact planId={deliverablesPlanId} />}
+                  <Suspense fallback={null}>
+                    {email && <EmailArtifact email={email} />}
+                    {proposedTasks && proposedTasks.length > 0 && (
+                      <TaskProposalArtifact tasks={proposedTasks} />
+                    )}
+                    {clarifyPayload && <InteractiveQuestions payload={clarifyPayload} />}
+                    {docPayload && <DocArtifact payload={docPayload} />}
+                    {deliveryPayload && <DeliveryChoice payload={deliveryPayload} />}
+                    {planId && <PlanArtifact planId={planId} />}
+                    {automationPlanId && <AutomationArtifact planId={automationPlanId} />}
+                    {schedulePlanId && <ScheduleArtifact planId={schedulePlanId} />}
+                    {deliverablesPlanId && <DeliverablesArtifact planId={deliverablesPlanId} />}
+                    {insightId && <InsightArtifact insightId={insightId} />}
+                  </Suspense>
                 </div>
               );
             })}
