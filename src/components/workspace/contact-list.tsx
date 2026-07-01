@@ -9,10 +9,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Users } from "lucide-react";
+import { TEAM_ROLE_LABEL } from "@/lib/workspace/harness";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data-store";
 import { useSelectionStore } from "@/stores/selection-store";
-import type { Contact, TeamMember } from "@/types";
+import type { Contact, TeamMember, WorkspaceMember } from "@/types";
 
 function TeamMemberRow({
   member,
@@ -48,6 +49,28 @@ function TeamMemberRow({
         Internal
       </Badge>
     </button>
+  );
+}
+
+function WorkspaceMemberRow({ member }: { member: WorkspaceMember }) {
+  return (
+    <div className="flex w-full items-center gap-3 border-b border-border/50 px-5 py-3.5 text-left">
+      <PersonAvatar
+        name={member.name}
+        avatarUrl={member.avatarUrl}
+        status={member.status}
+        size="lg"
+        shape="square"
+        className="shrink-0"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-base font-medium">{member.name}</p>
+        <p className="truncate text-sm text-muted-foreground">{member.email}</p>
+      </div>
+      <Badge variant={member.role === "owner" || member.role === "lead" ? "secondary" : "outline"} className="shrink-0 font-normal">
+        {TEAM_ROLE_LABEL[member.role]}
+      </Badge>
+    </div>
   );
 }
 
@@ -90,12 +113,16 @@ function ContactRow({
 
 export function ContactList() {
   const { projectId, selectedContactId, selectedMemberId } = useSelectionStore();
+  const projects = useDataStore((s) => s.projects);
+  const workspaceMembers = useDataStore((s) => s.workspaceMembers);
   const getContactsByProject = useDataStore((s) => s.getContactsByProject);
   const getTeamMembersByProject = useDataStore((s) => s.getTeamMembersByProject);
   const contacts = getContactsByProject(projectId);
   const members = getTeamMembersByProject(projectId);
+  const workspaceId = projects.find((project) => project.id === projectId)?.workspaceId;
+  const accessMembers = workspaceMembers.filter((member) => member.workspaceId === workspaceId);
 
-  if (contacts.length === 0 && members.length === 0) {
+  if (contacts.length === 0 && members.length === 0 && accessMembers.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 pb-32">
         <Empty className="max-w-md border border-dashed border-border bg-card/40">
@@ -116,6 +143,16 @@ export function ContactList() {
   return (
     <ScrollArea className="h-full w-full">
       <div className="pb-32">
+        {accessMembers.length > 0 ? (
+          <>
+            <div className="border-b border-border/50 px-5 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Workspace access
+            </div>
+            {accessMembers.map((member) => (
+              <WorkspaceMemberRow key={member.id} member={member} />
+            ))}
+          </>
+        ) : null}
         {members.length > 0 ? (
           <>
             <div className="border-b border-border/50 px-5 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">

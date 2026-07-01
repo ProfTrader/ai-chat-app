@@ -23,7 +23,7 @@ export function CommandPalette() {
 
   const navigate = (view: ViewType) => {
     setActiveView(view);
-    if (["briefs", "tasks", "board", "contacts"].includes(view)) {
+    if (["files", "briefs", "tasks", "board", "contacts", "timeline"].includes(view)) {
       setSidebarMode("projects");
     }
     setCommandOpen(false);
@@ -31,20 +31,21 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-      <CommandInput placeholder="Search projects, threads, tasks, team..." />
+      <CommandInput placeholder="Search teams, threads, tasks, people..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         <CommandGroup heading="Views">
           <CommandItem onSelect={() => navigate("chat")}>Go to Chat</CommandItem>
+          <CommandItem onSelect={() => navigate("files")}>Go to Files</CommandItem>
           <CommandItem onSelect={() => navigate("briefs")}>Go to Briefs</CommandItem>
           <CommandItem onSelect={() => navigate("tasks")}>Go to Tasks</CommandItem>
           <CommandItem onSelect={() => navigate("board")}>Go to Board</CommandItem>
           <CommandItem onSelect={() => navigate("contacts")}>Go to Team</CommandItem>
-          <CommandItem onSelect={() => navigate("timeline")}>Go to Timeline</CommandItem>
+          <CommandItem onSelect={() => navigate("timeline")}>Go to Monitor</CommandItem>
           <CommandItem onSelect={() => navigate("nodes")}>Go to Nodes</CommandItem>
         </CommandGroup>
         <CommandSeparator />
-        <CommandGroup heading="Projects">
+        <CommandGroup heading="Teams">
           {projects.map((project) => (
             <CommandItem
               key={project.id}
@@ -77,7 +78,7 @@ export function CommandPalette() {
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Tasks">
-          {tasks.slice(0, 8).map((task) => {
+          {tasks.filter((task) => !task.worktreeId).slice(0, 8).map((task) => {
             const assignee = findMemberByAssignee(
               getTeamMembersByProject(task.projectId),
               task.assignee,

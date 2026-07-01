@@ -57,10 +57,10 @@ export function useKeyboardShortcuts() {
 
       if (mod && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
         e.preventDefault();
-        const views: ViewType[] = ["chat", "briefs", "tasks", "board", "contacts", "timeline", "nodes"];
+        const views: ViewType[] = ["chat", "files", "tasks", "board", "contacts", "timeline", "nodes"];
         const view = views[Number(e.key) - 1];
         setActiveView(view);
-        if (["briefs", "tasks", "board", "contacts"].includes(view)) {
+        if (["files", "tasks", "board", "contacts", "timeline"].includes(view)) {
           setSidebarMode("projects");
         }
         return;

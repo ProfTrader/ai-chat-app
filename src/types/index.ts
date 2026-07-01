@@ -5,6 +5,40 @@ export interface Workspace {
   name: string;
 }
 
+export type TeamRole = "owner" | "lead" | "member" | "viewer";
+
+export type RoleCapability =
+  | "manage_workspace"
+  | "manage_integrations"
+  | "manage_roles"
+  | "approve_worktree"
+  | "request_worktree_review"
+  | "stage_work"
+  | "read_workspace";
+
+export interface WorkspaceMember {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: TeamRole;
+  avatarUrl?: string;
+  status?: PresenceStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamAssignment {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  memberId: string;
+  role?: TeamRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   workspaceId: string;
@@ -42,6 +76,10 @@ export interface Task {
   sourceRunId?: string;
   sourceDraftId?: string;
   sourceFinding?: string;
+  /** Set while the task is staged in a branch/worktree and not yet on HEAD. */
+  worktreeId?: string;
+  /** HEAD version this task became canonical in, once promoted. */
+  headVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +89,7 @@ export type NotificationType =
   | "flow_submitted"
   | "brief_created"
   | "email_drafted"
+  | "worktree_review"
   | "mention"
   | "info";
 
@@ -206,6 +245,61 @@ export interface ProjectDataset {
   updatedAt: string;
 }
 
+export type WorkspaceFileKind = "csv" | "markdown" | "text" | "link" | "dataset";
+
+export interface WorkspaceFile {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  name: string;
+  kind: WorkspaceFileKind;
+  /** Text payload or compact metadata. Binary storage is intentionally out of v1. */
+  content?: string;
+  sourceUrl?: string;
+  datasetId?: string;
+  size?: number;
+  worktreeId?: string;
+  headVersion?: number;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkspaceEventType =
+  | "branch_created"
+  | "file_staged"
+  | "task_staged"
+  | "review_requested"
+  | "promotion_approved"
+  | "promotion_rejected"
+  | "head_promoted"
+  | "head_rolled_back"
+  | "gateway_received"
+  | "agent_run_started"
+  | "task_created"
+  | "task_status_changed";
+
+export type WorkspaceEventSource = GatewayChannel | "nexus" | "system";
+
+export interface WorkspaceEvent {
+  id: string;
+  workspaceId: string;
+  projectId?: string;
+  worktreeId?: string;
+  headVersion?: number;
+  source: WorkspaceEventSource;
+  type: WorkspaceEventType;
+  actorId?: string;
+  actorName?: string;
+  title: string;
+  body?: string;
+  externalId?: string;
+  externalUrl?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  createdAt: string;
+}
+
 export type AgentRunStatus = "queued" | "running" | "needs_input" | "completed" | "failed";
 export type AgentStepKind =
   | "plan"
@@ -317,6 +411,7 @@ export interface UserProfile {
 export type ViewType =
   | "chat"
   | "briefs"
+  | "files"
   | "tasks"
   | "contacts"
   | "board"
@@ -401,7 +496,7 @@ export type AgentBrainStage =
   | "reflect"
   | "deliver"
   | "remember";
-export type GatewayChannel = "nexus_chat" | "webhook" | "slack" | "email";
+export type GatewayChannel = "nexus_chat" | "webhook" | "slack" | "github" | "email";
 export type MemoryKind = "working" | "project" | "preference" | "evidence";
 export type GraduatedTrustLevel = 0 | 1 | 2 | 3;
 
@@ -568,6 +663,10 @@ export interface GatewayMessage {
   projectId: string;
   channel: GatewayChannel;
   externalThreadId?: string;
+  externalId?: string;
+  externalUrl?: string;
+  eventType?: string;
+  metadata?: Record<string, string | number | boolean | null>;
   sender: string;
   text: string;
   status: "received" | "routed" | "failed";

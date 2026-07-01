@@ -5,8 +5,12 @@ const gateway = new Hono();
 
 const gatewayMessageSchema = z.object({
   projectId: z.string().min(1),
-  channel: z.enum(["nexus_chat", "webhook", "slack", "email"]).default("webhook"),
+  channel: z.enum(["nexus_chat", "webhook", "slack", "github", "email"]).default("webhook"),
   externalThreadId: z.string().optional(),
+  externalId: z.string().optional(),
+  externalUrl: z.string().url().optional(),
+  eventType: z.string().optional(),
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   sender: z.string().default("External source"),
   text: z.string().min(1),
 });
@@ -19,6 +23,10 @@ gateway.post("/messages", async (c) => {
     projectId: body.projectId,
     channel: body.channel,
     externalThreadId: body.externalThreadId,
+    externalId: body.externalId,
+    externalUrl: body.externalUrl,
+    eventType: body.eventType,
+    metadata: body.metadata,
     sender: body.sender,
     text: body.text,
     status: "routed",

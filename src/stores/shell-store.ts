@@ -7,6 +7,7 @@ export type SidebarMode = "chat" | "inbox" | "projects";
 const viewTypes = new Set<ViewType>([
   "chat",
   "briefs",
+  "files",
   "tasks",
   "contacts",
   "board",

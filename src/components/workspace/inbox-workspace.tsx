@@ -5,6 +5,7 @@ import {
   CheckCheck,
   Columns3,
   FileText,
+  GitBranch,
   Inbox,
   ListTodo,
   Mail,
@@ -62,6 +63,7 @@ const notificationIcon: Record<NotificationType, LucideIcon> = {
   flow_submitted: Columns3,
   brief_created: FileText,
   email_drafted: Mail,
+  worktree_review: GitBranch,
   mention: AtSign,
   info: Bell,
 };
@@ -71,6 +73,7 @@ const notificationTint: Record<NotificationType, string> = {
   flow_submitted: "bg-active-soft text-active",
   brief_created: "bg-fin/10 text-fin",
   email_drafted: "bg-primary/10 text-foreground",
+  worktree_review: "bg-warning/10 text-warning",
   mention: "bg-active-soft text-active",
   info: "bg-muted text-muted-foreground",
 };
@@ -216,7 +219,10 @@ export function InboxWorkspace() {
 
     // Open tasks across the workspace — the actionable backlog.
     tasks
-      .filter((task) => task.status !== "done" && workspaceProjectIds.has(task.projectId))
+      .filter(
+        (task) =>
+          task.status !== "done" && workspaceProjectIds.has(task.projectId) && !task.worktreeId,
+      )
       .forEach((task) => {
         result.push({
           id: `task-${task.id}`,

@@ -57,7 +57,7 @@ export const agentSkillDefinitions: AgentSkillDefinition[] = [
   {
     id: "gateway_triage",
     name: "Gateway triage",
-    description: "Routes inbound chat, webhook, Slack, or email messages into the right project run.",
+    description: "Routes inbound chat, webhook, Slack, GitHub, or email messages into the right project run.",
     scope: "gateway",
     risk: "low",
     triggerExamples: ["Webhook message received", "Slack thread update"],
@@ -129,7 +129,7 @@ export function classifyAgentIntent(prompt: string): "conversation" | "brief" | 
   const input = prompt.toLowerCase();
   if (/\b(brief|memo|report|artifact|dossier|pdf|html)\b/.test(input)) return "brief";
   if (/\b(task|todo|assign|owner|board|roadmap|follow[- ]?up)\b/.test(input)) return "task_proposal";
-  if (/\b(webhook|slack|email|notify|message channel|gateway)\b/.test(input)) return "gateway_notification";
+  if (/\b(webhook|slack|github|email|notify|message channel|gateway)\b/.test(input)) return "gateway_notification";
   return "conversation";
 }
 
@@ -189,6 +189,7 @@ export function defaultGatewayChannelLabel(channel: GatewayChannel) {
   if (channel === "nexus_chat") return "Nexus chat";
   if (channel === "webhook") return "Webhook";
   if (channel === "slack") return "Slack";
+  if (channel === "github") return "GitHub";
   return "Email";
 }
 

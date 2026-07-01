@@ -9,10 +9,13 @@ interface SelectionState {
   selectedContactId: string | null;
   selectedMemberId: string | null;
   memberFilterId: string | null;
+  /** Branch to focus when the Files workspace opens (e.g. from a Monitor event). */
+  selectedWorktreeId: string | null;
   contextChips: ContextChip[];
   setWorkspaceId: (id: string) => void;
   setProjectId: (id: string) => void;
   setSessionId: (id: string | null) => void;
+  selectWorktree: (id: string | null) => void;
   selectTask: (task: Task | null) => void;
   selectContact: (contact: Contact | null) => void;
   selectMember: (member: TeamMember | null) => void;
@@ -30,6 +33,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
   selectedContactId: null,
   selectedMemberId: null,
   memberFilterId: null,
+  selectedWorktreeId: null,
   contextChips: [],
   setWorkspaceId: (workspaceId) => set({ workspaceId }),
   setProjectId: (projectId) =>
@@ -39,8 +43,10 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       selectedContactId: null,
       selectedMemberId: null,
       memberFilterId: null,
+      selectedWorktreeId: null,
     }),
   setSessionId: (sessionId) => set({ sessionId }),
+  selectWorktree: (selectedWorktreeId) => set({ selectedWorktreeId }),
   selectTask: (task) =>
     set({
       selectedTaskId: task?.id ?? null,

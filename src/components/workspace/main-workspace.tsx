@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { CalendarDays, Columns3, ContactRound, Database, FileText, Inbox, ListTodo, Network } from "lucide-react";
+import { CalendarDays, Columns3, ContactRound, Database, FileText, FolderOpen, Inbox, ListTodo, Network } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useShellStore } from "@/stores/shell-store";
@@ -17,6 +17,11 @@ const ChatWorkspace = lazy(() =>
 const BriefsWorkspace = lazy(() =>
   import("@/components/workspace/briefs-workspace").then((module) => ({
     default: module.BriefsWorkspace,
+  })),
+);
+const FilesWorkspace = lazy(() =>
+  import("@/components/workspace/files-workspace").then((module) => ({
+    default: module.FilesWorkspace,
   })),
 );
 const TaskList = lazy(() =>
@@ -56,6 +61,11 @@ const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description:
     icon: FileText,
     description: "Project brief artifacts and delivery studio",
   },
+  files: {
+    label: "Files",
+    icon: FolderOpen,
+    description: "Team HEAD files and branch staging",
+  },
   tasks: {
     label: "Tasks",
     icon: ListTodo,
@@ -72,9 +82,9 @@ const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description:
     description: "People and companies attached to this project",
   },
   timeline: {
-    label: "Timeline",
+    label: "Monitor",
     icon: CalendarDays,
-    description: "Daily ledger and roadmap for project execution",
+    description: "Branch, gateway, task, and agent event stream",
   },
   nodes: {
     label: "Agent builder",
@@ -83,7 +93,7 @@ const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description:
   },
 };
 
-const projectViews: ViewType[] = ["chat", "briefs", "tasks", "board", "contacts"];
+const projectViews: ViewType[] = ["chat", "files", "tasks", "board", "contacts", "timeline"];
 
 function WorkspaceFallback() {
   return <div className="h-full bg-shell" aria-label="Loading workspace" />;
@@ -93,25 +103,38 @@ export function MainWorkspace() {
   const { activeView, sidebarMode } = useShellStore();
   const { sessionId, projectId } = useSelectionStore();
   const { composerMode } = useChatStore();
-  const { sessions, projects, workRuns, tasks, storageBackend, getTeamMembersByProject } = useDataStore();
+  const {
+    sessions,
+    projects,
+    workRuns,
+    tasks,
+    storageBackend,
+    workspaceFiles,
+    workspaceEvents,
+    getTeamMembersByProject,
+  } = useDataStore();
 
   const session = sessions.find((s) => s.id === sessionId);
   const project = projects.find((p) => p.id === projectId);
   const activeMeta = viewMeta[activeView];
   const ActiveIcon = activeMeta.icon;
   const projectScoped = projectViews.includes(activeView);
-  const projectTasks = tasks.filter((task) => task.projectId === projectId);
+  const projectTasks = tasks.filter((task) => task.projectId === projectId && !task.worktreeId);
   const activeCount =
     activeView === "chat"
       ? sessions.filter((item) => item.projectId === projectId).length
       : activeView === "briefs"
         ? workRuns.filter((run) => run.projectId === projectId).length
+      : activeView === "files"
+        ? workspaceFiles.filter((file) => file.projectId === projectId && !file.worktreeId).length
       : activeView === "tasks"
         ? projectTasks.filter((task) => task.status !== "done").length
       : activeView === "board"
         ? projectTasks.length
       : activeView === "contacts"
         ? getTeamMembersByProject(projectId).length
+      : activeView === "timeline"
+        ? workspaceEvents.filter((event) => event.projectId === projectId).length
       : undefined;
   const workspaceTitle =
     activeView === "chat" && sidebarMode === "inbox"
@@ -178,6 +201,7 @@ export function MainWorkspace() {
             <ChatWorkspace sessionId={sessionId} sidebarMode={sidebarMode} />
           )}
           {activeView === "briefs" && <BriefsWorkspace />}
+          {activeView === "files" && <FilesWorkspace />}
           {activeView === "tasks" && <TaskList />}
           {activeView === "board" && <KanbanBoard />}
           {activeView === "contacts" && <ContactList />}

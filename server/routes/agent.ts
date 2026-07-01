@@ -64,7 +64,7 @@ const skills = [
   {
     id: "gateway_triage",
     name: "Gateway triage",
-    description: "Normalizes chat, webhook, Slack, and email ingress into one project run ledger.",
+    description: "Normalizes chat, webhook, Slack, GitHub, and email ingress into one project run ledger.",
     scope: "gateway",
     risk: "low",
     requiredTools: ["route_gateway_message", "inspect_project_context"],
@@ -104,7 +104,7 @@ function classifyAgentRequest(request: string) {
   const input = request.toLowerCase();
   if (/\b(brief|memo|report|artifact|pdf|html)\b/.test(input)) return "brief";
   if (/\b(task|todo|assign|owner|board|follow[- ]?up)\b/.test(input)) return "task_proposal";
-  if (/\b(webhook|slack|email|notify|gateway)\b/.test(input)) return "gateway_notification";
+  if (/\b(webhook|slack|github|email|notify|gateway)\b/.test(input)) return "gateway_notification";
   return "conversation";
 }
 

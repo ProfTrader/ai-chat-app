@@ -28,12 +28,18 @@ import type {
   PermissionGrant,
   Project,
   ProjectDataset,
+  RoleCapability,
   ResearchDoc,
   RoadmapItem,
   Session,
   Task,
   TaskActivity,
   TaskStatus,
+  TeamRole,
+  WorkspaceEvent,
+  WorkspaceFile,
+  WorkspaceFileKind,
+  WorkspaceMember,
   TeamMember,
   TeamMessage,
   WorkLoopPhase,
@@ -53,9 +59,18 @@ import type { InsightDraft, InsightRecord } from "@/lib/insight/client";
 import {
   buildPromotedHead,
   headVersionLabel,
+  summarizePromotion,
   type HeadVersion,
+  type PromotionSummary,
   type Worktree,
 } from "@/lib/worktree/client";
+import {
+  canRolePerform,
+  canonicalTasksForProject,
+  effectiveRoleForUser,
+  normalizeWorktree,
+  stagedTasksForWorktree,
+} from "@/lib/workspace/harness";
 import {
   deriveAutomationFields,
   deriveCadence,
@@ -112,6 +127,7 @@ interface DataState {
   initialized: boolean;
   storageBackend: StorageBackend;
   workspaces: Workspace[];
+  workspaceMembers: WorkspaceMember[];
   projects: Project[];
   tasks: Task[];
   contacts: Contact[];
@@ -142,8 +158,16 @@ interface DataState {
   insights: InsightRecord[];
   worktrees: Worktree[];
   headVersions: HeadVersion[];
+  /**
+   * Per-team "active" HEAD pointer for rollback. Absent ⇒ readers follow the
+   * latest version; set ⇒ downstream reads (canonical files/datasets) pin to
+   * that older version until the team resumes latest or promotes again.
+   */
+  activeHeadVersionByTeam: Record<string, number>;
   automations: AutomationRule[];
   scheduleEntries: ScheduleEntry[];
+  workspaceFiles: WorkspaceFile[];
+  workspaceEvents: WorkspaceEvent[];
   selectedWorkRunId: string | null;
   initialize: () => Promise<void>;
   addTask: (task: Omit<Task, "id" | "createdAt" | "updatedAt" | "identifier">) => Promise<Task>;
@@ -219,15 +243,52 @@ interface DataState {
   getHeadVersion: (teamId: string) => HeadVersion | undefined;
   /** HEAD version history for a team, newest first. */
   getHeadVersions: (teamId: string) => HeadVersion[];
-  /** Datasets composing the team's current HEAD (latest version). */
+  /** Datasets composing the team's active HEAD (pinned version, else latest). */
   getHeadDatasets: (teamId: string) => ProjectDataset[];
+  /** The active HEAD for readers: the pinned rollback version, else latest. */
+  getActiveHeadVersion: (teamId: string) => HeadVersion | undefined;
+  /** Pin an older HEAD version as active (rollback). No-op without approve rights. */
+  pinHeadVersion: (teamId: string, version: number) => void;
+  /** Clear the rollback pin so readers follow the latest HEAD again. */
+  resumeLatestHead: (teamId: string) => void;
+  /** Pure pre-promotion diff for a worktree (net-new/appended datasets, counts). */
+  summarizePromotionForWorktree: (worktreeId: string) => PromotionSummary | null;
   /** Initialise HEAD v1 from a team's existing (non-worktree) datasets. */
   ensureHead: (teamId: string) => HeadVersion | undefined;
   /** Move a worktree into review (the CD approval gate). */
   requestWorktreePromotion: (worktreeId: string, note?: string) => Worktree | null;
   /** Approve + merge a worktree into a new immutable HEAD version. */
   promoteWorktree: (worktreeId: string) => HeadVersion | null;
+  approveWorktreePromotion: (worktreeId: string) => HeadVersion | null;
+  rejectWorktreePromotion: (worktreeId: string, reason?: string) => Worktree | null;
   discardWorktree: (worktreeId: string) => void;
+  /** Role/capability helpers used by UI and store guards. */
+  getEffectiveRole: (workspaceId?: string) => TeamRole;
+  canPerform: (workspaceId: string | undefined, capability: RoleCapability) => boolean;
+  /** Stage local-first files and tasks into a branch before review. */
+  stageFileToWorktree: (
+    worktreeId: string,
+    input: {
+      name: string;
+      kind: WorkspaceFileKind;
+      content?: string;
+      sourceUrl?: string;
+      domainId?: AgentDomainId;
+    },
+  ) => WorkspaceFile | null;
+  stageTaskToWorktree: (
+    worktreeId: string,
+    input: Pick<Task, "title" | "description" | "priority" | "dueDate" | "assignee">,
+  ) => Task | null;
+  getWorkspaceFilesByProject: (projectId: string) => WorkspaceFile[];
+  getCanonicalFilesByProject: (projectId: string) => WorkspaceFile[];
+  getFilesByWorktree: (worktreeId: string) => WorkspaceFile[];
+  recordWorkspaceEvent: (
+    event: Omit<WorkspaceEvent, "id" | "createdAt" | "actorId" | "actorName"> &
+      Partial<Pick<WorkspaceEvent, "actorId" | "actorName" | "createdAt">>,
+  ) => WorkspaceEvent;
+  getWorkspaceEventsByProject: (projectId: string) => WorkspaceEvent[];
+  getEventsByWorktree: (worktreeId: string) => WorkspaceEvent[];
 
   /** Derive one automation rule per plan step (idempotent per plan). */
   automatePlan: (id: string) => AutomationRule[];
@@ -314,6 +375,10 @@ interface DataState {
     sender: string;
     text: string;
     externalThreadId?: string;
+    externalId?: string;
+    externalUrl?: string;
+    eventType?: string;
+    metadata?: Record<string, string | number | boolean | null>;
   }) => GatewayMessage;
   routeGatewayMessage: (messageId: string, runId: string) => void;
   createWorkRunFromPrompt: (prompt: string, projectId?: string) => Promise<WorkRun>;
@@ -358,6 +423,7 @@ interface DataState {
 type PersistedDataPayload = {
   artifactSchemaVersion?: number;
   workspaces?: Workspace[];
+  workspaceMembers?: WorkspaceMember[];
   projects?: Project[];
   tasks?: Task[];
   contacts?: Contact[];
@@ -388,8 +454,11 @@ type PersistedDataPayload = {
   insights?: InsightRecord[];
   worktrees?: Worktree[];
   headVersions?: HeadVersion[];
+  activeHeadVersionByTeam?: Record<string, number>;
   automations?: AutomationRule[];
   scheduleEntries?: ScheduleEntry[];
+  workspaceFiles?: WorkspaceFile[];
+  workspaceEvents?: WorkspaceEvent[];
   notifications?: AppNotification[];
   selectedWorkRunId?: string | null;
 };
@@ -421,11 +490,16 @@ function buildRunContext(projectId: string, state: RunDataSnapshot) {
 
   return {
     project,
-    tasks: state.tasks.filter((task) => task.projectId === projectId),
+    tasks: canonicalTasksForProject(state.tasks, projectId),
     contacts: state.contacts.filter((contact) => contact.projectId === projectId),
     sessions,
     messages: state.messages.filter((message) => sessionIds.has(message.sessionId)),
   };
+}
+
+function workspaceIdForProject(projectId: string | undefined, state: Pick<DataState, "projects" | "workspaces">) {
+  if (!projectId) return state.workspaces[0]?.id ?? "ws-1";
+  return state.projects.find((project) => project.id === projectId)?.workspaceId ?? state.workspaces[0]?.id ?? "ws-1";
 }
 
 function hasCurrentRunShape(run: WorkRun) {
@@ -515,7 +589,7 @@ function attachDeliveryStagesToLatestDraft({
 
 const seedTaskActivityItems: TaskActivity[] = [];
 const seedRoadmapItems: RoadmapItem[] = [];
-const ARTIFACT_SCHEMA_VERSION = 8;
+const ARTIFACT_SCHEMA_VERSION = 9;
 
 /** Predefined team workspaces — a ready-made template, not mock data. */
 const SEED_PROJECT_CREATED_AT = "2026-01-06T09:00:00.000Z";
@@ -566,6 +640,69 @@ const SEED_TEAMMATES: TeamMember[] = [
 function mergeSeedTeammates(stored: TeamMember[]): TeamMember[] {
   const ids = new Set(stored.map((member) => member.id));
   return [...stored, ...SEED_TEAMMATES.filter((member) => !ids.has(member.id))];
+}
+
+function roleForSeedMember(member: TeamMember): TeamRole {
+  const title = member.role.toLowerCase();
+  if (title.includes("lead") || title.includes("manager")) return "lead";
+  return "member";
+}
+
+function defaultWorkspaceMembers(workspaces: Workspace[]): WorkspaceMember[] {
+  const now = SEED_PROJECT_CREATED_AT;
+  const workspaceId = workspaces[0]?.id ?? "ws-1";
+  const byEmail = new Map<string, WorkspaceMember>();
+  byEmail.set(currentUser.email.toLowerCase(), {
+    id: "wm-current-user",
+    workspaceId,
+    userId: currentUser.id,
+    name: currentUser.name,
+    email: currentUser.email,
+    role: "owner",
+    avatarUrl: currentUser.avatarUrl,
+    status: currentUser.status,
+    createdAt: now,
+    updatedAt: now,
+  });
+  SEED_TEAMMATES.forEach((member) => {
+    const email = member.email.toLowerCase();
+    if (byEmail.has(email)) return;
+    byEmail.set(email, {
+      id: `wm-${member.id}`,
+      workspaceId,
+      userId: member.id,
+      name: member.name,
+      email: member.email,
+      role: roleForSeedMember(member),
+      avatarUrl: member.avatarUrl,
+      status: member.status,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+  return Array.from(byEmail.values());
+}
+
+function normalizeWorkspaceMembers(
+  workspaces: Workspace[],
+  stored: WorkspaceMember[] = [],
+): WorkspaceMember[] {
+  const now = new Date().toISOString();
+  const fallback = defaultWorkspaceMembers(workspaces);
+  const byId = new Map<string, WorkspaceMember>();
+  stored.forEach((member) => {
+    if (!member.id || !member.workspaceId || !member.userId || !member.email) return;
+    byId.set(member.id, {
+      ...member,
+      role: member.role ?? "member",
+      createdAt: member.createdAt ?? now,
+      updatedAt: member.updatedAt ?? now,
+    });
+  });
+  fallback.forEach((member) => {
+    if (!byId.has(member.id)) byId.set(member.id, member);
+  });
+  return Array.from(byId.values());
 }
 
 function defaultProjects(): Project[] {
@@ -631,6 +768,7 @@ function hydratePersistedData(
         const merged = [...stored, ...TEAM_PROJECTS.filter((team) => !ids.has(team.id))];
         return merged.length > 0 ? merged : defaultProjects();
       })();
+  const workspaces = resetMock ? defaultWorkspaces() : data.workspaces ?? defaultWorkspaces();
   const shouldDropSeededChatHistory = (data.artifactSchemaVersion ?? 0) < 6;
   const validProjectIds = new Set(projects.map((project) => project.id));
   const storedBrainRuns =
@@ -661,7 +799,11 @@ function hydratePersistedData(
     artifactSchemaVersion: ARTIFACT_SCHEMA_VERSION,
     initialized: true,
     storageBackend,
-    workspaces: resetMock ? defaultWorkspaces() : data.workspaces ?? defaultWorkspaces(),
+    workspaces,
+    workspaceMembers: normalizeWorkspaceMembers(
+      workspaces,
+      resetMock ? [] : data.workspaceMembers ?? [],
+    ),
     projects,
     tasks: resetMock ? [] : data.tasks ?? [],
     contacts: enrichContacts(resetMock ? [] : data.contacts ?? []),
@@ -720,10 +862,36 @@ function hydratePersistedData(
     roadmapItems: resetMock ? [] : data.roadmapItems ?? seedRoadmapItems,
     plans: resetMock ? [] : Array.isArray(data.plans) ? data.plans : [],
     insights: resetMock ? [] : Array.isArray(data.insights) ? data.insights : [],
-    worktrees: resetMock ? [] : Array.isArray(data.worktrees) ? data.worktrees : [],
-    headVersions: resetMock ? [] : Array.isArray(data.headVersions) ? data.headVersions : [],
+    worktrees: resetMock
+      ? []
+      : Array.isArray(data.worktrees)
+        ? data.worktrees.map(normalizeWorktree)
+        : [],
+    headVersions: resetMock
+      ? []
+      : Array.isArray(data.headVersions)
+        ? data.headVersions.map((head) => ({
+            ...head,
+            fileIds: head.fileIds ?? [],
+            taskIds: head.taskIds ?? [],
+          }))
+        : [],
+    activeHeadVersionByTeam:
+      resetMock || typeof data.activeHeadVersionByTeam !== "object" || data.activeHeadVersionByTeam === null
+        ? {}
+        : data.activeHeadVersionByTeam,
     automations: resetMock ? [] : Array.isArray(data.automations) ? data.automations : [],
     scheduleEntries: resetMock ? [] : Array.isArray(data.scheduleEntries) ? data.scheduleEntries : [],
+    workspaceFiles: resetMock
+      ? []
+      : Array.isArray(data.workspaceFiles)
+        ? data.workspaceFiles
+        : [],
+    workspaceEvents: resetMock
+      ? []
+      : Array.isArray(data.workspaceEvents)
+        ? data.workspaceEvents
+        : [],
     notifications: resetMock ? [] : data.notifications ?? [],
     selectedWorkRunId: storedRuns.some((run) => run.id === data.selectedWorkRunId)
       ? data.selectedWorkRunId!
@@ -736,6 +904,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   initialized: false,
   storageBackend: "memory",
   workspaces: defaultWorkspaces(),
+  workspaceMembers: defaultWorkspaceMembers(defaultWorkspaces()),
   projects: defaultProjects(),
   tasks: [],
   contacts: [],
@@ -766,8 +935,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   insights: [],
   worktrees: [],
   headVersions: [],
+  activeHeadVersionByTeam: {},
   automations: [],
   scheduleEntries: [],
+  workspaceFiles: [],
+  workspaceEvents: [],
   notifications: [],
   selectedWorkRunId: null,
 
@@ -880,6 +1052,15 @@ export const useDataStore = create<DataState>((set, get) => ({
       ],
     });
     persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(task.projectId, get()),
+      projectId: task.projectId,
+      source: "nexus",
+      type: "task_created",
+      title: `${task.identifier} created`,
+      body: task.title,
+      metadata: { taskId: task.id },
+    });
     return task;
   },
 
@@ -916,6 +1097,17 @@ export const useDataStore = create<DataState>((set, get) => ({
       }
     } else {
       persistLocal(get());
+    }
+    if (previous) {
+      get().recordWorkspaceEvent({
+        workspaceId: workspaceIdForProject(previous.projectId, get()),
+        projectId: previous.projectId,
+        source: "nexus",
+        type: "task_status_changed",
+        title: `${previous.identifier} moved to ${status.replace("_", " ")}`,
+        body: previous.title,
+        metadata: { taskId: previous.id, status },
+      });
     }
   },
 
@@ -1209,7 +1401,12 @@ export const useDataStore = create<DataState>((set, get) => ({
   // --- Worktrees + HEAD ------------------------------------------------------
 
   createWorktree: (teamId, name) => {
+    const workspaceId = workspaceIdForProject(teamId, get());
+    if (!get().canPerform(workspaceId, "stage_work")) {
+      throw new Error("Not permitted to stage work in this workspace.");
+    }
     const now = new Date().toISOString();
+    const currentHead = get().getHeadVersion(teamId);
     const worktree: Worktree = {
       id: generateId("wt"),
       teamId,
@@ -1217,12 +1414,27 @@ export const useDataStore = create<DataState>((set, get) => ({
       ownerId: currentUser.id,
       ownerName: currentUser.name,
       status: "draft",
+      baseHeadVersion: currentHead?.version,
       datasetIds: [],
+      fileIds: [],
+      stagedTaskIds: [],
+      reviewers: [],
       createdAt: now,
       updatedAt: now,
     };
     set({ worktrees: [worktree, ...get().worktrees] });
     persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(teamId, get()),
+      projectId: teamId,
+      worktreeId: worktree.id,
+      source: "nexus",
+      type: "branch_created",
+      title: `${worktree.name} branch created`,
+      body: `Created by ${currentUser.name}.`,
+      metadata: { baseHeadVersion: currentHead?.version ?? 0 },
+      createdAt: now,
+    });
     return worktree;
   },
 
@@ -1291,9 +1503,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       .sort((a, b) => b.version - a.version),
 
   getHeadDatasets: (teamId) => {
-    const head = get()
-      .headVersions.filter((h) => h.teamId === teamId)
-      .sort((a, b) => b.version - a.version)[0];
+    const head = get().getActiveHeadVersion(teamId);
     if (!head) return [];
     const byId = new Map(get().datasets.map((d) => [d.id, d]));
     return head.datasetIds
@@ -1301,16 +1511,95 @@ export const useDataStore = create<DataState>((set, get) => ({
       .filter((d): d is ProjectDataset => Boolean(d));
   },
 
+  getActiveHeadVersion: (teamId) => {
+    const versions = get()
+      .headVersions.filter((h) => h.teamId === teamId)
+      .sort((a, b) => b.version - a.version);
+    if (versions.length === 0) return undefined;
+    const pinned = get().activeHeadVersionByTeam[teamId];
+    if (pinned != null) {
+      const match = versions.find((h) => h.version === pinned);
+      if (match) return match;
+    }
+    return versions[0];
+  },
+
+  pinHeadVersion: (teamId, version) => {
+    if (!get().canPerform(workspaceIdForProject(teamId, get()), "approve_worktree")) return;
+    const target = get().headVersions.find(
+      (h) => h.teamId === teamId && h.version === version,
+    );
+    const latest = get().getHeadVersion(teamId);
+    if (!target || !latest) return;
+    // Pinning the latest is just "resume latest" — keep the pointer clean.
+    if (version >= latest.version) {
+      get().resumeLatestHead(teamId);
+      return;
+    }
+    set({
+      activeHeadVersionByTeam: { ...get().activeHeadVersionByTeam, [teamId]: version },
+    });
+    persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(teamId, get()),
+      projectId: teamId,
+      headVersion: version,
+      source: "nexus",
+      type: "head_rolled_back",
+      title: `Rolled back to HEAD v${version}`,
+      body: `Downstream reads now follow ${target.label}.`,
+      createdAt: new Date().toISOString(),
+    });
+  },
+
+  resumeLatestHead: (teamId) => {
+    if (get().activeHeadVersionByTeam[teamId] == null) return;
+    const { [teamId]: _removed, ...rest } = get().activeHeadVersionByTeam;
+    set({ activeHeadVersionByTeam: rest });
+    persistLocal(get());
+    const latest = get().getHeadVersion(teamId);
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(teamId, get()),
+      projectId: teamId,
+      headVersion: latest?.version,
+      source: "nexus",
+      type: "head_rolled_back",
+      title: "Resumed latest HEAD",
+      body: latest ? `Active version is ${latest.label}.` : "Following latest HEAD.",
+      createdAt: new Date().toISOString(),
+    });
+  },
+
+  summarizePromotionForWorktree: (worktreeId) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree) return null;
+    const byId = new Map(get().datasets.map((d) => [d.id, d]));
+    const headDatasets = get().getHeadDatasets(worktree.teamId);
+    const worktreeDatasets = worktree.datasetIds
+      .map((id) => byId.get(id))
+      .filter((d): d is ProjectDataset => Boolean(d));
+    const stagedFiles = get().getFilesByWorktree(worktree.id);
+    const stagedTasks = stagedTasksForWorktree(get().tasks, worktree.id);
+    return summarizePromotion({ headDatasets, worktreeDatasets, stagedFiles, stagedTasks });
+  },
+
   ensureHead: (teamId) => {
     const existing = get()
       .headVersions.filter((h) => h.teamId === teamId)
       .sort((a, b) => b.version - a.version)[0];
     if (existing) return existing;
-    // Seed HEAD v1 from the team's existing canonical (non-worktree) datasets.
+    // Seed HEAD v1 from the team's existing canonical (non-worktree) files,
+    // datasets, and board tasks.
     const baseDatasets = get().datasets.filter(
       (d) => d.projectId === teamId && !d.worktreeId,
     );
-    if (baseDatasets.length === 0) return undefined;
+    const baseFiles = get().workspaceFiles.filter(
+      (file) => file.projectId === teamId && !file.worktreeId,
+    );
+    const baseTasks = canonicalTasksForProject(get().tasks, teamId);
+    if (baseDatasets.length === 0 && baseFiles.length === 0 && baseTasks.length === 0) {
+      return undefined;
+    }
     const now = new Date().toISOString();
     const head: HeadVersion = {
       id: generateId("head"),
@@ -1318,6 +1607,8 @@ export const useDataStore = create<DataState>((set, get) => ({
       version: 1,
       label: "v1 — initial",
       datasetIds: baseDatasets.map((d) => d.id),
+      fileIds: baseFiles.map((file) => file.id),
+      taskIds: baseTasks.map((task) => task.id),
       createdBy: currentUser.id,
       createdAt: now,
     };
@@ -1328,22 +1619,74 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   requestWorktreePromotion: (worktreeId, note) => {
     const worktree = get().worktrees.find((w) => w.id === worktreeId);
-    if (!worktree || worktree.datasetIds.length === 0) return null;
+    if (
+      !worktree ||
+      worktree.status !== "draft" ||
+      worktree.datasetIds.length + worktree.fileIds.length + worktree.stagedTaskIds.length === 0
+    ) {
+      return null;
+    }
     const now = new Date().toISOString();
+    const workspaceId = workspaceIdForProject(worktree.teamId, get());
+    if (!get().canPerform(workspaceId, "stage_work")) return null;
+    const reviewers = get()
+      .workspaceMembers.filter(
+        (member) =>
+          member.workspaceId === workspaceId &&
+          (member.role === "owner" || member.role === "lead"),
+      )
+      .map((member) => ({
+        id: member.userId,
+        name: member.name,
+        status: "requested" as const,
+      }));
     const updated: Worktree = {
       ...worktree,
       status: "in_review",
       note: note ?? worktree.note,
+      reviewers,
+      requestedAt: now,
       updatedAt: now,
     };
     set({ worktrees: get().worktrees.map((w) => (w.id === worktreeId ? updated : w)) });
     persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId,
+      projectId: worktree.teamId,
+      worktreeId,
+      source: "nexus",
+      type: "review_requested",
+      title: `${worktree.name} requested review`,
+      body: note || "Branch is ready for lead review.",
+      metadata: {
+        files: worktree.fileIds.length,
+        tasks: worktree.stagedTaskIds.length,
+        datasets: worktree.datasetIds.length,
+      },
+      createdAt: now,
+    });
+    get().addNotification({
+      type: "worktree_review",
+      title: `${worktree.name} is ready for review`,
+      body: note || "A team branch needs approval before promotion.",
+      projectId: worktree.teamId,
+      actor: currentUser.name,
+    });
     return updated;
   },
 
   promoteWorktree: (worktreeId) => {
     const worktree = get().worktrees.find((w) => w.id === worktreeId);
-    if (!worktree || worktree.datasetIds.length === 0) return null;
+    if (
+      !worktree ||
+      worktree.status !== "in_review" ||
+      worktree.datasetIds.length + worktree.fileIds.length + worktree.stagedTaskIds.length === 0
+    ) {
+      return null;
+    }
+    if (!get().canPerform(workspaceIdForProject(worktree.teamId, get()), "approve_worktree")) {
+      return null;
+    }
     const teamId = worktree.teamId;
     const prev = get()
       .headVersions.filter((h) => h.teamId === teamId)
@@ -1364,40 +1707,319 @@ export const useDataStore = create<DataState>((set, get) => ({
       makeId: generateId,
       now,
     });
+    const stagedFiles = worktree.fileIds
+      .map((id) => get().workspaceFiles.find((file) => file.id === id))
+      .filter((file): file is WorkspaceFile => Boolean(file));
+    const newFiles = stagedFiles.map((file) => ({
+      ...file,
+      id: generateId("file"),
+      worktreeId: undefined,
+      headVersion: version,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    const existingHeadFileIds =
+      prev?.fileIds ??
+      get()
+        .workspaceFiles.filter((file) => file.projectId === teamId && !file.worktreeId)
+        .map((file) => file.id);
+    const stagedTasks = stagedTasksForWorktree(get().tasks, worktree.id);
+    const existingHeadTaskIds =
+      prev?.taskIds ?? canonicalTasksForProject(get().tasks, teamId).map((task) => task.id);
+    const taskSeed = [...get().tasks];
+    const newTasks = stagedTasks.map((task) => {
+      const promoted: Task = {
+        ...task,
+        id: generateId("task"),
+        identifier: generateIdentifier(teamId, taskSeed),
+        worktreeId: undefined,
+        headVersion: version,
+        createdAt: now,
+        updatedAt: now,
+      };
+      taskSeed.push(promoted);
+      return promoted;
+    });
     const head: HeadVersion = {
       id: generateId("head"),
       teamId,
       version,
       label: headVersionLabel(version, worktree.name),
       datasetIds,
+      fileIds: [...existingHeadFileIds, ...newFiles.map((file) => file.id)],
+      taskIds: [...existingHeadTaskIds, ...newTasks.map((task) => task.id)],
       sourceWorktreeId: worktree.id,
       note: worktree.note,
       createdBy: currentUser.id,
       createdAt: now,
       parentVersion: prev?.version,
     };
+    // Drop the branch-local staged originals now that immutable HEAD snapshots
+    // exist — otherwise they accumulate forever behind their worktreeId.
+    const stagedDatasetIds = new Set(worktree.datasetIds);
+    const stagedFileIds = new Set(worktree.fileIds);
+    const stagedTaskIds = new Set(stagedTasks.map((task) => task.id));
+    const { [teamId]: _cleared, ...remainingActiveHead } = get().activeHeadVersionByTeam;
     set({
-      datasets: [...newDatasets, ...get().datasets],
+      datasets: [...newDatasets, ...get().datasets.filter((d) => !stagedDatasetIds.has(d.id))],
+      workspaceFiles: [
+        ...newFiles,
+        ...get().workspaceFiles.filter((file) => !stagedFileIds.has(file.id)),
+      ],
+      tasks: [...newTasks, ...get().tasks.filter((task) => !stagedTaskIds.has(task.id))],
       headVersions: [head, ...get().headVersions],
+      // Promotion advances the active pointer to the new latest version.
+      activeHeadVersionByTeam: remainingActiveHead,
       worktrees: get().worktrees.map((w) =>
         w.id === worktreeId
-          ? { ...w, status: "promoted", promotedToVersion: version, updatedAt: now }
+          ? {
+              ...w,
+              status: "promoted",
+              promotedToVersion: version,
+              reviewedAt: now,
+              reviewedBy: currentUser.name,
+              reviewers: w.reviewers.map((reviewer) =>
+                reviewer.id === currentUser.id
+                  ? { ...reviewer, status: "approved", reviewedAt: now }
+                  : reviewer,
+              ),
+              updatedAt: now,
+            }
           : w,
       ),
+      taskActivities: [
+        ...newTasks.map((task) => ({
+          id: generateId("activity"),
+          projectId: task.projectId,
+          taskId: task.id,
+          type: "task_created" as const,
+          title: `${task.identifier} promoted from branch`,
+          description: task.title,
+          actor: "User" as const,
+          createdAt: now,
+        })),
+        ...get().taskActivities,
+      ],
     });
     persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(teamId, get()),
+      projectId: teamId,
+      worktreeId,
+      headVersion: version,
+      source: "nexus",
+      type: "head_promoted",
+      title: `${worktree.name} promoted to HEAD v${version}`,
+      body: `${newFiles.length} files and ${newTasks.length} tasks became canonical.`,
+      metadata: {
+        files: newFiles.length,
+        tasks: newTasks.length,
+        datasets: newDatasets.length,
+      },
+      createdAt: now,
+    });
     return head;
+  },
+
+  approveWorktreePromotion: (worktreeId) => get().promoteWorktree(worktreeId),
+
+  rejectWorktreePromotion: (worktreeId, reason) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree || worktree.status !== "in_review") return null;
+    const now = new Date().toISOString();
+    const updated: Worktree = {
+      ...worktree,
+      status: "draft",
+      rejectionReason: reason,
+      reviewedAt: now,
+      reviewedBy: currentUser.name,
+      reviewers: worktree.reviewers.map((reviewer) =>
+        reviewer.id === currentUser.id
+          ? { ...reviewer, status: "rejected", reviewedAt: now }
+          : reviewer,
+      ),
+      updatedAt: now,
+    };
+    set({ worktrees: get().worktrees.map((w) => (w.id === worktreeId ? updated : w)) });
+    persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(worktree.teamId, get()),
+      projectId: worktree.teamId,
+      worktreeId,
+      source: "nexus",
+      type: "promotion_rejected",
+      title: `${worktree.name} review rejected`,
+      body: reason || "Returned to draft for more work.",
+      createdAt: now,
+    });
+    return updated;
   },
 
   discardWorktree: (worktreeId) => {
     const now = new Date().toISOString();
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    // Reclaim the branch's staged datasets/files/tasks — none of it ever
+    // reached HEAD, so it can be dropped outright.
+    const stagedDatasetIds = new Set(worktree?.datasetIds ?? []);
+    const stagedFileIds = new Set(worktree?.fileIds ?? []);
+    const stagedTaskIds = new Set(worktree?.stagedTaskIds ?? []);
     set({
+      datasets: get().datasets.filter((d) => !stagedDatasetIds.has(d.id)),
+      workspaceFiles: get().workspaceFiles.filter((file) => !stagedFileIds.has(file.id)),
+      tasks: get().tasks.filter((task) => !stagedTaskIds.has(task.id)),
       worktrees: get().worktrees.map((w) =>
         w.id === worktreeId ? { ...w, status: "discarded", updatedAt: now } : w,
       ),
     });
     persistLocal(get());
+    if (worktree) {
+      get().recordWorkspaceEvent({
+        workspaceId: workspaceIdForProject(worktree.teamId, get()),
+        projectId: worktree.teamId,
+        worktreeId,
+        source: "nexus",
+        type: "promotion_rejected",
+        title: `${worktree.name} discarded`,
+        body: "Branch was removed from the active workflow.",
+        createdAt: now,
+      });
+    }
   },
+
+  stageFileToWorktree: (worktreeId, input) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree || worktree.status !== "draft") return null;
+    const now = new Date().toISOString();
+    const workspaceId = workspaceIdForProject(worktree.teamId, get());
+    if (!get().canPerform(workspaceId, "stage_work")) return null;
+    const content = input.content?.trim();
+    const dataset =
+      input.kind === "csv" && content
+        ? {
+            ...createDatasetFromCsv({
+              projectId: worktree.teamId,
+              name: input.name || "Staged CSV",
+              domainId: input.domainId ?? "general",
+              text: content,
+            }),
+            worktreeId,
+          }
+        : null;
+    const file: WorkspaceFile = {
+      id: generateId("file"),
+      workspaceId,
+      projectId: worktree.teamId,
+      name: input.name.trim() || "Untitled file",
+      kind: input.kind,
+      content,
+      sourceUrl: input.sourceUrl?.trim() || undefined,
+      datasetId: dataset?.id,
+      size: content?.length,
+      worktreeId,
+      createdBy: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({
+      workspaceFiles: [file, ...get().workspaceFiles],
+      datasets: dataset ? [dataset, ...get().datasets] : get().datasets,
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId
+          ? {
+              ...w,
+              fileIds: [file.id, ...w.fileIds],
+              datasetIds: dataset ? [dataset.id, ...w.datasetIds] : w.datasetIds,
+              updatedAt: now,
+            }
+          : w,
+      ),
+    });
+    persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId,
+      projectId: worktree.teamId,
+      worktreeId,
+      source: "nexus",
+      type: "file_staged",
+      title: `${file.name} staged`,
+      body: dataset ? "CSV parsed into a staged dataset." : "File metadata staged in the branch.",
+      metadata: { fileId: file.id, kind: file.kind, datasetId: dataset?.id ?? null },
+      createdAt: now,
+    });
+    return file;
+  },
+
+  stageTaskToWorktree: (worktreeId, input) => {
+    const worktree = get().worktrees.find((w) => w.id === worktreeId);
+    if (!worktree || worktree.status !== "draft" || !input.title.trim()) return null;
+    if (!get().canPerform(workspaceIdForProject(worktree.teamId, get()), "stage_work")) return null;
+    const now = new Date().toISOString();
+    const task: Task = {
+      id: generateId("task"),
+      projectId: worktree.teamId,
+      identifier: generateIdentifier(worktree.teamId, get().tasks),
+      title: input.title.trim(),
+      status: "todo",
+      description: input.description?.trim() || undefined,
+      priority: input.priority ?? "medium",
+      dueDate: input.dueDate,
+      assignee: input.assignee?.trim() || undefined,
+      worktreeId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({
+      tasks: [task, ...get().tasks],
+      worktrees: get().worktrees.map((w) =>
+        w.id === worktreeId
+          ? { ...w, stagedTaskIds: [task.id, ...w.stagedTaskIds], updatedAt: now }
+          : w,
+      ),
+    });
+    persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(worktree.teamId, get()),
+      projectId: worktree.teamId,
+      worktreeId,
+      source: "nexus",
+      type: "task_staged",
+      title: `${task.identifier} staged`,
+      body: task.title,
+      metadata: { taskId: task.id },
+      createdAt: now,
+    });
+    return task;
+  },
+
+  getWorkspaceFilesByProject: (projectId) =>
+    get().workspaceFiles.filter((file) => file.projectId === projectId),
+
+  getCanonicalFilesByProject: (projectId) => {
+    // When a HEAD version is active (incl. a rollback pin), canonical = that
+    // version's file composition. Before any promotion, fall back to all
+    // non-worktree files so freshly seeded teams still show their files.
+    const head = get().getActiveHeadVersion(projectId);
+    const nonWorktree = get().workspaceFiles.filter(
+      (file) => file.projectId === projectId && !file.worktreeId,
+    );
+    if (!head) return nonWorktree;
+    const inHead = new Set(head.fileIds);
+    return nonWorktree.filter((file) => inHead.has(file.id));
+  },
+
+  getFilesByWorktree: (worktreeId) =>
+    get().workspaceFiles.filter((file) => file.worktreeId === worktreeId),
+
+  getWorkspaceEventsByProject: (projectId) =>
+    get()
+      .workspaceEvents.filter((event) => event.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+
+  getEventsByWorktree: (worktreeId) =>
+    get()
+      .workspaceEvents.filter((event) => event.worktreeId === worktreeId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
 
   automatePlan: (id) => {
     const plan = get().plans.find((item) => item.id === id);
@@ -1440,7 +2062,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     // Best-effort link to the board tasks created from this plan (matched by
     // title within the plan's project) so each gets a due date.
     const projectTasks = plan.projectId
-      ? get().tasks.filter((task) => task.projectId === plan.projectId)
+      ? canonicalTasksForProject(get().tasks, plan.projectId)
       : [];
     const taskByTitle = new Map(projectTasks.map((task) => [task.title.trim(), task]));
 
@@ -1570,6 +2192,29 @@ export const useDataStore = create<DataState>((set, get) => ({
     persistLocal(get());
   },
 
+  recordWorkspaceEvent: (input) => {
+    const event: WorkspaceEvent = {
+      ...input,
+      id: generateId("event"),
+      actorId: input.actorId ?? currentUser.id,
+      actorName: input.actorName ?? currentUser.name,
+      createdAt: input.createdAt ?? new Date().toISOString(),
+    };
+    set({ workspaceEvents: [event, ...get().workspaceEvents].slice(0, 500) });
+    persistLocal(get());
+    return event;
+  },
+
+  getEffectiveRole: (workspaceId) =>
+    effectiveRoleForUser({
+      workspaceId: workspaceId ?? get().workspaces[0]?.id ?? "ws-1",
+      userId: currentUser.id,
+      members: get().workspaceMembers,
+    }),
+
+  canPerform: (workspaceId, capability) =>
+    canRolePerform(get().getEffectiveRole(workspaceId), capability),
+
   archiveProject: (projectId) => {
     const now = new Date().toISOString();
     set({
@@ -1640,8 +2285,8 @@ export const useDataStore = create<DataState>((set, get) => ({
             : "conversation");
     const contextPack = buildAgentContextPack({
       projectId,
-      tasks: state.tasks.filter((task) => task.projectId === projectId),
-      datasets: state.datasets.filter((dataset) => dataset.projectId === projectId),
+      tasks: canonicalTasksForProject(state.tasks, projectId),
+      datasets: state.datasets.filter((dataset) => dataset.projectId === projectId && !dataset.worktreeId),
       contacts: state.contacts.filter((contact) => contact.projectId === projectId),
       teamMembers: state.teamMembers.filter((member) => member.projectId === projectId),
       memories: state.agentMemories.filter((memory) => memory.projectId === projectId),
@@ -1753,6 +2398,19 @@ export const useDataStore = create<DataState>((set, get) => ({
         : state.gatewayMessages,
     });
     persistLocal(get());
+    const gatewaySource = input.gatewayMessageId
+      ? state.gatewayMessages.find((message) => message.id === input.gatewayMessageId)?.channel ?? "webhook"
+      : "nexus";
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(projectId, get()),
+      projectId,
+      source: gatewaySource,
+      type: "agent_run_started",
+      title: `${run.title} started`,
+      body: contextPack.summary,
+      metadata: { runId: run.id, intent: run.intent },
+      createdAt: now,
+    });
     return run;
   },
 
@@ -1934,6 +2592,10 @@ export const useDataStore = create<DataState>((set, get) => ({
       projectId: input.projectId,
       channel: input.channel,
       externalThreadId: input.externalThreadId,
+      externalId: input.externalId,
+      externalUrl: input.externalUrl,
+      eventType: input.eventType,
+      metadata: input.metadata,
       sender: input.sender || channelLabel,
       text: input.text,
       status: "received",
@@ -1941,6 +2603,18 @@ export const useDataStore = create<DataState>((set, get) => ({
     };
     set({ gatewayMessages: [message, ...get().gatewayMessages] });
     persistLocal(get());
+    get().recordWorkspaceEvent({
+      workspaceId: workspaceIdForProject(input.projectId, get()),
+      projectId: input.projectId,
+      source: input.channel,
+      type: "gateway_received",
+      title: `${channelLabel} message received`,
+      body: `${message.sender}: ${message.text}`,
+      externalId: input.externalId ?? input.externalThreadId,
+      externalUrl: input.externalUrl,
+      metadata: { eventType: input.eventType ?? "message", ...(input.metadata ?? {}) },
+      createdAt: message.createdAt,
+    });
     return message;
   },
 
@@ -1960,7 +2634,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { workRun, agentRun, memoryNotes } = runBusinessIntelligenceAgent({
       prompt,
       ...context,
-      datasets: state.datasets.filter((dataset) => dataset.projectId === targetProjectId),
+      datasets: state.datasets.filter(
+        (dataset) => dataset.projectId === targetProjectId && !dataset.worktreeId,
+      ),
     });
 
     set({
@@ -2136,7 +2812,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     const { workRun, agentRun, memoryNotes } = runBusinessIntelligenceAgent({
       prompt,
       ...context,
-      datasets: state.datasets.filter((dataset) => dataset.projectId === targetProjectId),
+      datasets: state.datasets.filter(
+        (dataset) => dataset.projectId === targetProjectId && !dataset.worktreeId,
+      ),
     });
     forwardEvent({
       event: "evidence_inspected",
@@ -2380,7 +3058,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   getTasksByProject: (projectId) =>
-    get().tasks.filter((t) => t.projectId === projectId),
+    canonicalTasksForProject(get().tasks, projectId),
 
   getContactsByProject: (projectId) =>
     enrichContacts(get().contacts.filter((c) => c.projectId === projectId)),
@@ -2402,7 +3080,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   getDatasetsByProject: (projectId) =>
-    get().datasets.filter((dataset) => dataset.projectId === projectId),
+    get().datasets.filter((dataset) => dataset.projectId === projectId && !dataset.worktreeId),
 
   getMessagesBySession: (sessionId) =>
     get().messages.filter((m) => m.sessionId === sessionId),
@@ -2430,6 +3108,7 @@ function persistLocal(state: DataState) {
   const payload = {
     artifactSchemaVersion: state.artifactSchemaVersion,
     workspaces: state.workspaces,
+    workspaceMembers: state.workspaceMembers,
     projects: state.projects,
     tasks: state.tasks,
     contacts: state.contacts,
@@ -2460,8 +3139,11 @@ function persistLocal(state: DataState) {
     insights: state.insights,
     worktrees: state.worktrees,
     headVersions: state.headVersions,
+    activeHeadVersionByTeam: state.activeHeadVersionByTeam,
     automations: state.automations,
     scheduleEntries: state.scheduleEntries,
+    workspaceFiles: state.workspaceFiles,
+    workspaceEvents: state.workspaceEvents,
     notifications: state.notifications,
     selectedWorkRunId: state.selectedWorkRunId,
   };

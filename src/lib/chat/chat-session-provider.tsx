@@ -1456,7 +1456,9 @@ export function ChatSessionProvider({
         projectName: project?.name,
       });
       const projectTasks = projectId ? getTasksByProject(projectId) : [];
-      const projectDatasets = datasets.filter((dataset) => dataset.projectId === projectId);
+      const projectDatasets = datasets.filter(
+        (dataset) => dataset.projectId === projectId && !dataset.worktreeId,
+      );
       const projectContacts = contacts.filter((contact) => contact.projectId === projectId);
       const projectTeamMembers = teamMembers.filter((member) => member.projectId === projectId);
       const stages = planningStages({

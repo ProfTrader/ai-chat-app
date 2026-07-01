@@ -1240,7 +1240,7 @@ export function BriefsWorkspace() {
     [projectId, workRuns],
   );
   const projectDatasets = useMemo(
-    () => datasets.filter((dataset) => dataset.projectId === projectId),
+    () => datasets.filter((dataset) => dataset.projectId === projectId && !dataset.worktreeId),
     [datasets, projectId],
   );
   const selectedRun = useMemo(

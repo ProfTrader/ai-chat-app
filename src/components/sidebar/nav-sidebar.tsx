@@ -63,10 +63,11 @@ const projectFiles: {
   icon: LucideIcon;
 }[] = [
   { value: "chat", label: "Chat", icon: MessageSquare },
-  { value: "briefs", label: "Briefs", icon: FileText },
+  { value: "files", label: "Files", icon: FolderOpen },
   { value: "tasks", label: "Tasks", icon: ListTodo },
   { value: "board", label: "Board", icon: Columns3 },
   { value: "contacts", label: "Team", icon: ContactRound },
+  { value: "timeline", label: "Monitor", icon: CalendarDays },
 ];
 
 function isProjectFileView(view: ViewType) {
@@ -74,7 +75,6 @@ function isProjectFileView(view: ViewType) {
 }
 
 const utilityViews: { value: ViewType; label: string; icon: LucideIcon }[] = [
-  { value: "timeline", label: "Timeline", icon: CalendarDays },
   { value: "nodes", label: "Agent builder", icon: Network },
 ];
 
@@ -649,7 +649,7 @@ function ProjectTreeItem({
           >
             <Archive />
           </TooltipTrigger>
-          <TooltipContent>Archive project</TooltipContent>
+          <TooltipContent>Archive team</TooltipContent>
         </Tooltip>
       </div>
 
@@ -812,7 +812,7 @@ function ChatQueueRow({
                       variant="ghost"
                       size="icon-xs"
                       className="text-muted-foreground"
-                      aria-label="Assign chat to a project"
+                      aria-label="Assign chat to a team"
                     />
                   }
                 />
@@ -820,10 +820,10 @@ function ChatQueueRow({
             >
               <FolderOpen />
             </TooltipTrigger>
-            <TooltipContent>Assign to project</TooltipContent>
+            <TooltipContent>Assign to team</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel>Assign to project</DropdownMenuLabel>
+            <DropdownMenuLabel>Assign to team</DropdownMenuLabel>
             <DropdownMenuGroup>
               {workspaceProjects.map((project) => (
                 <DropdownMenuItem
@@ -944,7 +944,7 @@ function ChatQueue({ query }: { query: string }) {
     if (session.id === sessionId) setProjectId(nextProjectId);
     toast.success(
       nextProjectId
-        ? `Moved to ${projectNameById.get(nextProjectId) ?? "project"}`
+        ? `Moved to ${projectNameById.get(nextProjectId) ?? "team"}`
         : "Moved to Unassigned",
     );
   };
@@ -981,7 +981,7 @@ function ChatQueue({ query }: { query: string }) {
       </div>
       {chatSessions.length === 0 ? (
         <div className="rounded-md px-2 py-6 text-center text-xs text-muted-foreground">
-          No conversations yet. Start a chat and assign it to a project later.
+          No conversations yet. Start a chat and assign it to a team later.
         </div>
       ) : (
         <div className="space-y-0.5">
@@ -993,7 +993,7 @@ function ChatQueue({ query }: { query: string }) {
               unread={unreadSessionIds.has(session.id)}
               projectName={
                 session.projectId
-                  ? projectNameById.get(session.projectId) ?? "Project"
+                  ? projectNameById.get(session.projectId) ?? "Team"
                   : "Unassigned"
               }
               workspaceProjects={workspaceProjects}
@@ -1014,6 +1014,8 @@ function QueuePanel({ query }: { query: string }) {
     sessions,
     messages,
     tasks,
+    workspaceFiles,
+    workspaceEvents,
     workRuns,
     addProject,
     archiveProject,
@@ -1123,7 +1125,9 @@ function QueuePanel({ query }: { query: string }) {
   }, [messages, notificationReadAt, notificationsInitializedAt, sessions]);
 
   const countsForProject = (id: string): Partial<Record<ViewType, number>> => {
-    const projectTasks = tasks.filter((task) => task.projectId === id);
+    const projectTasks = tasks.filter((task) => task.projectId === id && !task.worktreeId);
+    const projectFiles = workspaceFiles.filter((file) => file.projectId === id && !file.worktreeId);
+    const projectEvents = workspaceEvents.filter((event) => event.projectId === id);
     const projectSessions = sessions.filter(
       (session) => session.projectId === id && !session.archivedAt,
     );
@@ -1137,6 +1141,14 @@ function QueuePanel({ query }: { query: string }) {
         hasUnreadSince({
           timestamp: run.updatedAt,
           key: notificationKeys.projectView(id, "briefs"),
+          readAt: notificationReadAt,
+          baseline: notificationsInitializedAt,
+        }),
+      ).length,
+      files: projectFiles.filter((file) =>
+        hasUnreadSince({
+          timestamp: file.updatedAt,
+          key: notificationKeys.projectView(id, "files"),
           readAt: notificationReadAt,
           baseline: notificationsInitializedAt,
         }),
@@ -1158,15 +1170,23 @@ function QueuePanel({ query }: { query: string }) {
         }),
       ).length,
       contacts: 0,
+      timeline: projectEvents.filter((event) =>
+        hasUnreadSince({
+          timestamp: event.createdAt,
+          key: notificationKeys.projectView(id, "timeline"),
+          readAt: notificationReadAt,
+          baseline: notificationsInitializedAt,
+        }),
+      ).length,
     };
   };
   const createProject = async () => {
     const nextProjectNumber = projects.filter((project) => project.workspaceId === workspaceId).length + 1;
-    const project = await addProject(`New Project ${nextProjectNumber}`, workspaceId);
+    const project = await addProject(`New Team ${nextProjectNumber}`, workspaceId);
     setProjectId(project.id);
     setSessionId(null);
     setActiveView("chat");
-    toast.success("Project created");
+    toast.success("Team created");
   };
 
   const archiveCurrentProject = () => {
@@ -1193,7 +1213,7 @@ function QueuePanel({ query }: { query: string }) {
         <div className="mb-1 flex items-center gap-1 px-1 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <FolderOpen className="size-3.5" />
-            <span>Projects</span>
+            <span>Teams</span>
             <NotificationBadge count={projectsUnreadCount} />
           </div>
           <Tooltip>
@@ -1203,14 +1223,14 @@ function QueuePanel({ query }: { query: string }) {
                   variant="ghost"
                   size="icon-xs"
                   className="text-muted-foreground"
-                  aria-label="New project"
+                  aria-label="New team"
                   onClick={() => void createProject()}
                 />
               }
             >
               <Plus />
             </TooltipTrigger>
-            <TooltipContent>New project</TooltipContent>
+            <TooltipContent>New team</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -1220,14 +1240,14 @@ function QueuePanel({ query }: { query: string }) {
                   size="icon-xs"
                   className="text-muted-foreground"
                   disabled={!projectId}
-                  aria-label="Archive project"
+                  aria-label="Archive team"
                   onClick={archiveCurrentProject}
                 />
               }
             >
               <Archive />
             </TooltipTrigger>
-            <TooltipContent>Archive project</TooltipContent>
+            <TooltipContent>Archive team</TooltipContent>
           </Tooltip>
         </div>
         {workspaceProjects.map((project) => {
@@ -1291,6 +1311,8 @@ export function NavSidebar() {
   const messages = useDataStore((s) => s.messages);
   const projects = useDataStore((s) => s.projects);
   const tasks = useDataStore((s) => s.tasks);
+  const workspaceFiles = useDataStore((s) => s.workspaceFiles);
+  const workspaceEvents = useDataStore((s) => s.workspaceEvents);
   const workRuns = useDataStore((s) => s.workRuns);
   const unreadNotifications = useDataStore(
     (s) => s.notifications.filter((notification) => !notification.read).length,
@@ -1367,6 +1389,7 @@ export function NavSidebar() {
             const taskUnread = tasks.filter(
               (task) =>
                 task.projectId === project.id &&
+                !task.worktreeId &&
                 hasUnreadSince({
                   timestamp: task.updatedAt,
                   key: notificationKeys.projectView(project.id, "tasks"),
@@ -1377,6 +1400,7 @@ export function NavSidebar() {
             const boardUnread = tasks.filter(
               (task) =>
                 task.projectId === project.id &&
+                !task.worktreeId &&
                 hasUnreadSince({
                   timestamp: task.updatedAt,
                   key: notificationKeys.projectView(project.id, "board"),
@@ -1394,8 +1418,29 @@ export function NavSidebar() {
                   baseline: notificationsInitializedAt,
                 }),
             ).length;
+            const fileUnread = workspaceFiles.filter(
+              (file) =>
+                file.projectId === project.id &&
+                !file.worktreeId &&
+                hasUnreadSince({
+                  timestamp: file.updatedAt,
+                  key: notificationKeys.projectView(project.id, "files"),
+                  readAt: notificationReadAt,
+                  baseline: notificationsInitializedAt,
+                }),
+            ).length;
+            const monitorUnread = workspaceEvents.filter(
+              (event) =>
+                event.projectId === project.id &&
+                hasUnreadSince({
+                  timestamp: event.createdAt,
+                  key: notificationKeys.projectView(project.id, "timeline"),
+                  readAt: notificationReadAt,
+                  baseline: notificationsInitializedAt,
+                }),
+            ).length;
 
-            return [project.id, chatUnread + taskUnread + boardUnread + briefUnread] as const;
+            return [project.id, chatUnread + taskUnread + boardUnread + briefUnread + fileUnread + monitorUnread] as const;
           }),
       ),
     [
@@ -1405,6 +1450,8 @@ export function NavSidebar() {
       sessionUnreadCounts,
       sessions,
       tasks,
+      workspaceEvents,
+      workspaceFiles,
       workRuns,
       workspaceId,
     ],
@@ -1434,8 +1481,24 @@ export function NavSidebar() {
       activeView === "tasks" || activeView === "board"
         ? latestTimestamp(
             tasks
-              .filter((task) => task.projectId === projectId)
+              .filter((task) => task.projectId === projectId && !task.worktreeId)
               .map((task) => task.updatedAt),
+          )
+        : undefined;
+    const fileTimestamp =
+      activeView === "files"
+        ? latestTimestamp(
+            workspaceFiles
+              .filter((file) => file.projectId === projectId && !file.worktreeId)
+              .map((file) => file.updatedAt),
+          )
+        : undefined;
+    const monitorTimestamp =
+      activeView === "timeline"
+        ? latestTimestamp(
+            workspaceEvents
+              .filter((event) => event.projectId === projectId)
+              .map((event) => event.createdAt),
           )
         : undefined;
     const briefTimestamp =
@@ -1447,10 +1510,10 @@ export function NavSidebar() {
           )
         : undefined;
 
-    return [activeView, projectId, sessionId, activeSessionTimestamp, taskTimestamp, briefTimestamp]
+    return [activeView, projectId, sessionId, activeSessionTimestamp, taskTimestamp, briefTimestamp, fileTimestamp, monitorTimestamp]
       .filter(Boolean)
       .join("|");
-  }, [activeView, messages, projectId, sessionId, sessions, tasks, workRuns]);
+  }, [activeView, messages, projectId, sessionId, sessions, tasks, workRuns, workspaceEvents, workspaceFiles]);
 
   useEffect(() => {
     const now = new Date().toISOString();
@@ -1465,7 +1528,7 @@ export function NavSidebar() {
       projectId && activeView === "chat"
         ? notificationKeys.projectView(projectId, "chat")
         : null,
-      projectId && activeView !== "chat" && activeView !== "nodes" && activeView !== "timeline"
+      projectId && activeView !== "chat" && activeView !== "nodes"
         ? notificationKeys.projectView(projectId, activeView)
         : null,
       sessionId && activeView === "chat" ? notificationKeys.session(sessionId) : null,
@@ -1531,7 +1594,7 @@ export function NavSidebar() {
             />
             <ModuleButton
               icon={FolderOpen}
-              label="Projects"
+              label="Teams"
               count={projectCount}
               isActive={sidebarMode === "projects"}
               onClick={() => {

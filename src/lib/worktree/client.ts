@@ -14,9 +14,16 @@
  * (data-store) owns persistence and the CD pipeline actions.
  */
 
-import type { ProjectDataset } from "@/types";
+import type { ProjectDataset, Task, WorkspaceFile } from "@/types";
 
 export type WorktreeStatus = "draft" | "in_review" | "promoted" | "discarded";
+
+export interface WorktreeReviewer {
+  id: string;
+  name: string;
+  status: "requested" | "approved" | "rejected";
+  reviewedAt?: string;
+}
 
 export interface Worktree {
   id: string;
@@ -26,11 +33,22 @@ export interface Worktree {
   ownerId: string;
   ownerName: string;
   status: WorktreeStatus;
+  /** HEAD version this branch started from. */
+  baseHeadVersion?: number;
   /** Datasets staged in this worktree (isolated from HEAD). */
   datasetIds: string[];
+  /** Files staged in this worktree (isolated from HEAD). */
+  fileIds: string[];
+  /** Proposed tasks staged in this worktree (isolated from the canonical board). */
+  stagedTaskIds: string[];
+  reviewers: WorktreeReviewer[];
   note?: string;
   createdAt: string;
   updatedAt: string;
+  requestedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
   /** HEAD version this worktree merged into, once promoted. */
   promotedToVersion?: number;
 }
@@ -43,6 +61,10 @@ export interface HeadVersion {
   label: string;
   /** Datasets composing this immutable HEAD snapshot. */
   datasetIds: string[];
+  /** Files composing this immutable HEAD snapshot. */
+  fileIds: string[];
+  /** Tasks composing this immutable HEAD snapshot. */
+  taskIds: string[];
   sourceWorktreeId?: string;
   note?: string;
   createdBy: string;
@@ -129,4 +151,52 @@ export function buildPromotedHead(input: {
 /** Short, human label for a promotion, e.g. `v3 — merged "Q1 actuals"`. */
 export function headVersionLabel(version: number, worktreeName: string): string {
   return `v${version} — merged "${worktreeName.trim() || "worktree"}"`;
+}
+
+/** One dataset's contribution to a promotion — either rows appended or net-new. */
+export interface PromotionDatasetChange {
+  name: string;
+  /** true ⇒ this dataset does not exist on HEAD and will be added whole. */
+  isNew: boolean;
+  /** Rows this promotion adds (all rows for net-new, staged rows for appends). */
+  rowsAdded: number;
+}
+
+/**
+ * Pre-promotion diff — what merging a worktree into HEAD would change. Pure and
+ * side-effect free so the UI can preview it before the user approves. Mirrors
+ * the merge rules in {@link buildPromotedHead}: same-name datasets append rows,
+ * unmatched staged datasets are net-new.
+ */
+export interface PromotionSummary {
+  datasetChanges: PromotionDatasetChange[];
+  filesAdded: number;
+  tasksAdded: number;
+  rowsAdded: number;
+  /** True when nothing is staged — promotion would be a no-op. */
+  empty: boolean;
+}
+
+export function summarizePromotion(input: {
+  headDatasets: ProjectDataset[];
+  worktreeDatasets: ProjectDataset[];
+  stagedFiles: WorkspaceFile[];
+  stagedTasks: Task[];
+}): PromotionSummary {
+  const { headDatasets, worktreeDatasets, stagedFiles, stagedTasks } = input;
+  const headNames = new Set(headDatasets.map((d) => normalizeName(d.name)));
+  const datasetChanges: PromotionDatasetChange[] = worktreeDatasets.map((d) => ({
+    name: d.name,
+    isNew: !headNames.has(normalizeName(d.name)),
+    rowsAdded: d.rows.length,
+  }));
+  const rowsAdded = datasetChanges.reduce((sum, change) => sum + change.rowsAdded, 0);
+  return {
+    datasetChanges,
+    filesAdded: stagedFiles.length,
+    tasksAdded: stagedTasks.length,
+    rowsAdded,
+    empty:
+      datasetChanges.length === 0 && stagedFiles.length === 0 && stagedTasks.length === 0,
+  };
 }
