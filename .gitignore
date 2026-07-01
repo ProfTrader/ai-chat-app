@@ -37,3 +37,6 @@ server/.env
 
 # Local browser automation scratch output
 .playwright-cli/
+
+# Local Spotlight skip-marker (machine-specific dev hygiene)
+.metadata_never_index

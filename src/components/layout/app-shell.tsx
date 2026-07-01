@@ -1,13 +1,8 @@
-import { memo, useEffect, useMemo } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo } from "react";
 import { usePanelRef } from "react-resizable-panels";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { NavSidebar } from "@/components/sidebar/nav-sidebar";
 import { MainWorkspace } from "@/components/workspace/main-workspace";
-import { InspectorPanel } from "@/components/inspector/inspector-panel";
-import { CommandPalette } from "@/components/command-palette";
-import { ShortcutsDialog } from "@/components/shortcuts-dialog";
-import { SettingsDialog } from "@/components/settings/settings-dialog";
-import { ProfileSheet } from "@/components/profile/profile-sheet";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -16,19 +11,53 @@ import {
 import { Button } from "@/components/ui/button";
 import { useShellStore } from "@/stores/shell-store";
 
+const InspectorPanel = lazy(() =>
+  import("@/components/inspector/inspector-panel").then((module) => ({
+    default: module.InspectorPanel,
+  })),
+);
+const CommandPalette = lazy(() =>
+  import("@/components/command-palette").then((module) => ({
+    default: module.CommandPalette,
+  })),
+);
+const ShortcutsDialog = lazy(() =>
+  import("@/components/shortcuts-dialog").then((module) => ({
+    default: module.ShortcutsDialog,
+  })),
+);
+const SettingsDialog = lazy(() =>
+  import("@/components/settings/settings-dialog").then((module) => ({
+    default: module.SettingsDialog,
+  })),
+);
+const ProfileSheet = lazy(() =>
+  import("@/components/profile/profile-sheet").then((module) => ({
+    default: module.ProfileSheet,
+  })),
+);
+
 const MemoNavSidebar = memo(NavSidebar);
 const MemoMainWorkspace = memo(MainWorkspace);
-const MemoInspectorPanel = memo(InspectorPanel);
-const MemoCommandPalette = memo(CommandPalette);
-const MemoShortcutsDialog = memo(ShortcutsDialog);
-const MemoSettingsDialog = memo(SettingsDialog);
-const MemoProfileSheet = memo(ProfileSheet);
+
+function PanelLoading({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center bg-pane text-xs text-muted-foreground">
+      <Loader2 className="mr-2 size-3.5 animate-spin" />
+      {label}
+    </div>
+  );
+}
 
 export function AppShell() {
   const {
     activeView,
     navCollapsed,
     inspectorCollapsed,
+    commandOpen,
+    shortcutsOpen,
+    settingsOpen,
+    profileOpen,
     navPanelSize,
     inspectorPanelSize,
     setNavCollapsed,
@@ -128,7 +157,9 @@ export function AppShell() {
                 aria-hidden={inspectorCollapsed}
                 className="h-full min-h-0 min-w-0 overflow-hidden border-l border-border bg-pane"
               >
-                <MemoInspectorPanel />
+                <Suspense fallback={<PanelLoading label="Loading inspector" />}>
+                  <InspectorPanel />
+                </Suspense>
               </section>
             </ResizablePanel>
           </>
@@ -158,10 +189,26 @@ export function AppShell() {
           <ChevronLeft />
         </Button>
       ) : null}
-      <MemoCommandPalette />
-      <MemoShortcutsDialog />
-      <MemoSettingsDialog />
-      <MemoProfileSheet />
+      {commandOpen ? (
+        <Suspense fallback={null}>
+          <CommandPalette />
+        </Suspense>
+      ) : null}
+      {shortcutsOpen ? (
+        <Suspense fallback={null}>
+          <ShortcutsDialog />
+        </Suspense>
+      ) : null}
+      {settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsDialog />
+        </Suspense>
+      ) : null}
+      {profileOpen ? (
+        <Suspense fallback={null}>
+          <ProfileSheet />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

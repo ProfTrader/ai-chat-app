@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { CalendarDays, Columns3, ContactRound, Database, FileText, FolderOpen, Inbox, ListTodo, Network } from "lucide-react";
+import { CalendarDays, Columns3, ContactRound, Database, FileText, FolderOpen, Inbox, ListTodo, Loader2, Network } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useShellStore } from "@/stores/shell-store";
@@ -96,7 +96,12 @@ const viewMeta: Record<ViewType, { label: string; icon: LucideIcon; description:
 const projectViews: ViewType[] = ["chat", "files", "tasks", "board", "contacts", "timeline"];
 
 function WorkspaceFallback() {
-  return <div className="h-full bg-shell" aria-label="Loading workspace" />;
+  return (
+    <div className="flex h-full items-center justify-center bg-shell text-sm text-muted-foreground" aria-label="Loading workspace">
+      <Loader2 className="mr-2 size-4 animate-spin" />
+      Loading workspace
+    </div>
+  );
 }
 
 export function MainWorkspace() {
