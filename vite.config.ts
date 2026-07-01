@@ -18,23 +18,7 @@ export default defineConfig(async () => ({
   },
 
   optimizeDeps: {
-    // The app has several heavy, lazy-only surfaces (charts, node builder,
-    // markdown artifacts, AI streaming helpers). Letting Vite crawl the whole
-    // graph on cold start can leave dev stuck in a deps_temp directory and the
-    // browser waiting on JavaScript. Disable cold-start discovery/prebundling
-    // and let secondary-view packages load only when their route is requested.
-    noDiscovery: true,
-    holdUntilCrawlEnd: false,
-    include: [],
-    exclude: [
-      "@tauri-apps/api",
-      "@tauri-apps/plugin-sql",
-      "@xyflow/react",
-      "ai",
-      "react-markdown",
-      "recharts",
-      "remark-gfm",
-    ],
+    entries: ["index.html"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
